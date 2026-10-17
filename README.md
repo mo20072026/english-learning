@@ -25,9 +25,11 @@ python -m http.server 8000
 
 ## 发布到 GitHub Pages（约 2 分钟）
 
+### 方式 A：网页上传（不需要任何命令，最安全）
+
 1. 在 GitHub 新建一个仓库，例如 `english-workspace`，**Public**。
    （Private 仓库要开 Pages 需要付费计划，静态站建议直接用 Public。）
-2. 把这 5 个文件上传到仓库根目录（网页端 Add file → Upload files 拖进去即可）。
+2. 打开仓库 → **Add file → Upload files**，把 `index.html`、`style.css`、`app.js`、`data.js`、`.nojekyll` 拖进去，Commit。
 3. 进入仓库 **Settings → Pages**：
    - Source 选 **Deploy from a branch**
    - Branch 选 **main**，目录选 **/ (root)**，Save。
@@ -36,6 +38,17 @@ python -m http.server 8000
 ```
 https://<你的用户名>.github.io/english-workspace/
 ```
+
+### 方式 B：一条命令推送
+
+```powershell
+powershell -ExecutionPolicy Bypass -File publish.ps1 -Repo https://github.com/<你的用户名>/english-workspace.git
+```
+
+认证由本机 Git Credential Manager 弹窗完成——每次推送都会弹窗让你确认，脚本本身不接收、不保存任何密码或 Token。
+推送成功后再按上面第 3 步开一次 Pages 即可。
+
+> 注意：GitHub 自 2021 年 8 月起**不再支持用账号密码做 git 认证**，只能用浏览器授权、Personal Access Token 或 SSH key。
 
 ### 绑定自己的域名（可选）
 
