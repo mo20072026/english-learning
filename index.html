@@ -44,7 +44,7 @@
         <p id="pageSub">按分类、子类、掌握情况筛选，可点单词卡片上的朗读图标听发音</p>
       </div>
       <div class="spacer"></div>
-      <span class="sync"><span class="dot" id="syncDot"></span><span id="syncText">本地就绪</span></span>
+      <span class="sync"><span class="dot" id="syncDot"></span><span id="syncText">本地就绪</span><button class="btn ghost sm" id="syncRetry" data-act="ghPush" hidden style="margin-left:6px">重试</button></span>
     </div>
 
     <!-- ============ 单词 ============ -->
@@ -158,6 +158,7 @@
             <button class="btn ghost" data-act="ghPull">从 Gist 拉取</button>
             <button class="btn ghost" data-act="ghTest">验证 Token</button>
             <button class="btn ghost" data-act="ghDiag">同步自检</button>
+            <button class="btn ghost" data-act="ghUnify">统一备份文件</button>
           </div>
           <div id="ghBox" style="margin-bottom:12px"></div>
 

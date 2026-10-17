@@ -375,9 +375,15 @@
   }
   function ghStatus(text, cls) {
     var el = $('ghStatus');
-    if (!el) return;
-    el.textContent = text;
-    el.className = 'dot' + (cls ? ' ' + cls : '');
+    if (el) {
+      el.textContent = text;
+      el.className = 'dot' + (cls ? ' ' + cls : '');
+    }
+    /* 顶栏指示器在所有页面都可见：同步失败时用户能立刻看到，并可直接重试 */
+    var dot = $('syncDot'), txt = $('syncText'), retry = $('syncRetry');
+    if (dot) dot.className = 'dot' + (cls ? ' ' + cls : '');
+    if (txt) txt.textContent = state.gh.token ? text : '本地进度';
+    if (retry) retry.hidden = !(state.gh.token && cls === 'off');
   }
   function ghPayload() {
     return JSON.stringify({
@@ -437,6 +443,69 @@
       }
       return state.gh.gistId || '';
     });
+  }
+  /* 读取任意一个 Gist 里的进度（用于统一多个备份文件） */
+  function readGistProg(id) {
+    return ghFetch(GH_API + '/gists/' + id, { headers: ghHeaders() }).then(function (g) {
+      var f = g.files && g.files[GH_FILE];
+      if (!f) return null;
+      var o = JSON.parse(f.content || '{}');
+      return { prog: (o && o.prog) || {}, resetAt: (o && o.resetAt) || 0 };
+    }).catch(function () { return null; });
+  }
+  /* 账号下出现多个备份文件时（不同设备各自创建过），合并到最近更新的那个并删除多余的。
+     不统一的话，各设备会一直各写各的文件，看起来就是"单向同步"。 */
+  function ghUnify() {
+    if (!state.gh.token) { toast('请先填写 Token'); return Promise.resolve(0); }
+    return ghFetch(GH_API + '/gists?per_page=100', { headers: ghHeaders() })
+      .then(function (list) {
+        var arr = Array.isArray(list) ? list : [];
+        var hit = arr.filter(function (g) { return g && g.files && g.files[GH_FILE]; })
+          .sort(function (a, b) { return String(a.updated_at || '') < String(b.updated_at || '') ? 1 : -1; });
+        if (hit.length < 2) {
+          toast(hit.length ? '只找到 1 个备份文件，无需统一' : '账号下没有备份文件');
+          return 0;
+        }
+        return Promise.all(hit.map(function (g) { return readGistProg(g.id); })).then(function (rows) {
+          var merged = {}, reset = state.resetAt || 0;
+          rows.forEach(function (r) {
+            if (!r) return;
+            if ((r.resetAt || 0) > reset) reset = r.resetAt || 0;
+            Object.keys(r.prog || {}).forEach(function (id) {
+              var b = r.prog[id], a = merged[id];
+              if (b && (!a || (b.t || 0) > (a.t || 0))) merged[id] = b;
+            });
+          });
+          Object.keys(state.prog).forEach(function (id) {          /* 本机也参与合并 */
+            var a = state.prog[id], b = merged[id];
+            if (a && (!b || (a.t || 0) > (b.t || 0))) merged[id] = a;
+          });
+          state.prog = merged;
+          state.resetAt = reset;
+          saveProg();
+          lsSet(LS_RESET, reset);
+          state.gh.gistId = hit[0].id;
+          ghSave();
+          var gid = $('ghGist');
+          if (gid) gid.value = state.gh.gistId;
+          var body = { files: (function () { var o = {}; o[GH_FILE] = { content: ghPayload() }; return o; })() };
+          return ghFetch(GH_API + '/gists/' + hit[0].id, { method: 'PATCH', headers: ghHeaders(), body: JSON.stringify(body) })
+            .then(function () {
+              /* 删掉多余的；删不掉也不影响，因为已经统一指向同一个文件 */
+              return Promise.all(hit.slice(1).map(function (g) {
+                return ghFetch(GH_API + '/gists/' + g.id, { method: 'DELETE', headers: ghHeaders() })
+                  .catch(function () { return null; });
+              }));
+            })
+            .then(function () {
+              refreshAll();
+              renderGhBox();
+              toast('已把 ' + hit.length + ' 个备份文件合并为 1 个，共 ' + Object.keys(merged).length + ' 条标记');
+              return hit.length;
+            });
+        });
+      })
+      .catch(function (e) { toast('统一失败：' + (e.message || e)); return 0; });
   }
   function ghCreateGist() {
     return ghFetch(GH_API + '/gists', {
@@ -643,6 +712,9 @@
         var arr = Array.isArray(list) ? list : [];
         var hit = arr.filter(function (g) { return g && g.files && g.files[GH_FILE]; });
         push('账号 Gist：' + arr.length + ' 个，含备份文件：' + hit.length + ' 个');
+        if (hit.length > 1) {
+          push('⚠ 账号下有 ' + hit.length + ' 个备份文件：设备可能各写一个，这正是「单向同步」的典型原因。请点「统一备份文件」合并成一个。');
+        }
         if (hit.length) hit.forEach(function (g) { push('  - ' + g.id + '（' + (g.description || '无描述') + '）'); });
         return ghEnsureGist(true);
       })
@@ -1076,6 +1148,7 @@
       return;
     }
     if (act === 'ghDiag') { ghDiag(); return; }
+    if (act === 'ghUnify') { ghUnify(); return; }
     if (act === 'ghPush') { ghPush(false); return; }
     if (act === 'ghPull') { ghPull(); return; }
     if (act === 'ghCopyCode') {
@@ -1167,7 +1240,7 @@
 
   window.__EN__ = {
     state: state, renderList: renderList, pickReview: pickReview, setLevel: setLevel, speak: speak,
-    ghSync: ghSync, ghPush: ghPush, ghPull: ghPull, flushPush: flushPush, ghDiag: ghDiag,
+    ghSync: ghSync, ghPush: ghPush, ghPull: ghPull, flushPush: flushPush, ghDiag: ghDiag, ghUnify: ghUnify,
     makeSyncCode: makeSyncCode, parseSyncCode: parseSyncCode, applySyncCode: applySyncCode, syncLink: syncLink
   };
 })();
