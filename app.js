@@ -923,7 +923,9 @@
         : '自动同步已关闭：只能手动「上传」或「拉取」。') + '</div>'
       + (state.ghLastSync ? '<div class="muted" style="margin-top:6px">上次同步：' + esc(syncAgoText()) + '</div>' : '')
       + (state.ghError ? '<div style="color:var(--color-danger);margin-top:6px">最近错误：' + esc(state.ghError) + '</div>' : '');
-    ghStatus(state.gh.gistId ? '已连接' : (state.ghError ? '失败' : '待创建'), state.gh.gistId ? '' : (state.ghError ? 'off' : ''));
+    /* 有错误就保持失败态，否则会把刚显示出来的「重试」入口又隐藏掉 */
+    if (state.ghError) { ghStatus('同步失败', 'off'); return; }
+    ghStatus(state.gh.gistId ? '已连接' : '待创建', state.gh.gistId ? '' : '');
   }
 
   /* ---------------- 视图切换 ---------------- */
