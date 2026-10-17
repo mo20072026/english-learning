@@ -37,7 +37,8 @@
     ghPushOk: null,
     __build: '20261017-3',
     pushTimer: null,
-    pollTimer: null
+    pollTimer: null,
+    agoTimer: null
   };
   var SYNC_PREFIX = 'ENSYNC1.';
   var POLL_MS = 60000;        /* 后台轮询间隔：页面可见时每 60 秒对齐一次 */
@@ -384,6 +385,17 @@
     if (dot) dot.className = 'dot' + (cls ? ' ' + cls : '');
     if (txt) txt.textContent = state.gh.token ? text : '本地进度';
     if (retry) retry.hidden = !(state.gh.token && cls === 'off');
+    renderSyncAgo();
+  }
+  /* 右上角「上次同步」：只显示相对时间，每 30 秒自己刷新一次，不发请求 */
+  function renderSyncAgo() {
+    var el = $('syncAgo');
+    if (!el) return;
+    if (!state.gh.token) { el.textContent = ''; el.title = '填写 Token 后可跨设备同步'; return; }
+    el.textContent = state.ghLastSync
+      ? syncAgoText()
+      : (state.ghBusy ? '正在同步…' : '等待同步');
+    el.title = state.ghLastSync ? new Date(state.ghLastSync).toLocaleString() : '尚未同步过';
   }
   function ghPayload() {
     return JSON.stringify({
@@ -858,6 +870,9 @@
 
   /* ---------------- 后台自动同步：回到前台 / 恢复网络 / 定时 / 离开页面 ---------------- */
   function startAutoSync() {
+    renderSyncAgo();                                  /* 先把已有的「上次同步」显示出来 */
+    clearInterval(state.agoTimer);
+    state.agoTimer = setInterval(renderSyncAgo, 30000); /* 相对时间自己走，不额外发请求 */
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') ghSync();
       else flushPush();                 /* 切走或锁屏时立刻回传未上传的标记 */
