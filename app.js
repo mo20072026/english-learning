@@ -340,7 +340,7 @@
       method: 'POST',
       headers: ghHeaders(),
       body: JSON.stringify({
-        description: '英语学习工作台 · 学习进度备份',
+        description: '英语学习 · 学习进度备份',
         public: false,
         files: (function () { var o = {}; o[GH_FILE] = { content: ghPayload() }; return o; })()
       })
