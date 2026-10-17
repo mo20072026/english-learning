@@ -65,9 +65,19 @@ powershell -ExecutionPolicy Bypass -File publish.ps1 -Repo https://github.com/<�
 | --- | --- |
 | 默认 | 存本机浏览器 `localStorage`，换浏览器/清缓存会丢 |
 | 导出/导入 | 设置页可导出 `english-progress.json`，在另一台设备导入 |
-| GitHub Gist 同步 | 设置页填自己的 Personal Access Token（只需 `gist` 权限），进度会写进你账号下的**私有 Gist**，换设备「从 Gist 拉取」即可 |
+| GitHub Gist 同步 | 设置页填 Personal Access Token（只需 `gist` 权限），进度写进你账号下的**私有 Gist**。开启「自动同步」后每次打开页面自动拉取合并、标记后自动回传；换设备把 Gist 地址（或 ID）粘贴到「Gist ID」输入框即可接着学 |
 
 Token 只保存在本机浏览器，不上传任何服务器；请求直接发往 `api.github.com`。
+
+### 多设备/多端口怎么保持一致
+
+进度按「浏览器源」（协议+主机+端口）隔离，所以换端口、换地址、换设备都各存一份。
+开启 Gist 同步后：
+
+- **打开页面**：自动拉取云端进度并与本地按单条时间戳合并，新者胜；
+- **标记单词**：约 2.5 秒后回传，回传前会再拉一次云端合并，**不会覆盖另一台设备**；
+- **两端一致**：不产生多余写入；
+- **清空进度**：会记录一个 `resetAt` 时间戳，云端更早的旧标记不会被同步回来。
 
 ## 更新词条
 

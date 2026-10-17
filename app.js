@@ -10,6 +10,7 @@
   var LS_PROG = 'en_prog_v2';   /* v2：2026-10-17 全量重置为「未掌握」，旧进度作废 */
   var LS_PROG_OLD = 'en_prog_v1';
   var LS_GH = 'en_gh_v1';
+  var LS_RESET = 'en_prog_reset_v1';   /* 最近一次「清空进度」的时间戳，同步时用来压过云端旧标记 */
   var PAGE = 40;
   var REVIEW_N = 10;
 
@@ -21,10 +22,12 @@
     lv: { words: '' },
     page: { words: PAGE, talks: PAGE },
     prog: {},
+    resetAt: 0,
     gh: { token: '', gistId: '', auto: true },
     review: [],
     reviewSeen: [],
     ghBusy: false,
+    ghSynced: false,
     pushTimer: null
   };
 
@@ -321,7 +324,12 @@
     el.className = 'dot' + (cls ? ' ' + cls : '');
   }
   function ghPayload() {
-    return JSON.stringify({ v: 1, updatedAt: new Date().toISOString(), prog: state.prog });
+    return JSON.stringify({
+      v: 2,
+      updatedAt: new Date().toISOString(),
+      resetAt: state.resetAt || 0,
+      prog: state.prog
+    });
   }
   function ghFetch(url, opt) {
     return fetch(url, opt).then(function (r) {
@@ -350,20 +358,87 @@
       return g;
     });
   }
+  /* 读取云端进度；Gist 还没建或已被删时返回 null */
+  function ghSupported() {
+    return typeof fetch === 'function' && typeof Promise === 'function';
+  }
+  function ghRead() {
+    if (!ghSupported()) return Promise.resolve(null);
+    if (!state.gh.token || !state.gh.gistId) return Promise.resolve(null);
+    return ghFetch(GH_API + '/gists/' + state.gh.gistId, { headers: ghHeaders() })
+      .then(function (g) {
+        var f = g.files && g.files[GH_FILE];
+        if (!f) return null;
+        if (f.truncated && f.raw_url) {
+          return fetch(f.raw_url).then(function (r) { return r.text(); });
+        }
+        return f.content || '';
+      })
+      .then(function (text) {
+        if (!text) return null;
+        var obj = JSON.parse(text);
+        return { prog: (obj && obj.prog) || {}, resetAt: (obj && obj.resetAt) || 0 };
+      })
+      .catch(function (e) {
+        if (/HTTP 404/.test(e.message)) return null;   /* Gist 被删了，当作空云端 */
+        throw e;
+      });
+  }
+
+  /* 双向合并：按单条时间戳，新者胜；「清空进度」之前产生的标记不再复活 */
+  function ghMerge(remote, remoteResetAt) {
+    var cut = Math.max(state.resetAt || 0, remoteResetAt || 0);
+    if (cut > (state.resetAt || 0)) { state.resetAt = cut; lsSet(LS_RESET, cut); }
+    var changed = 0;
+    Object.keys(remote || {}).forEach(function (id) {
+      var b = remote[id];
+      if (!b || (b.t || 0) <= cut) return;
+      var a = state.prog[id];
+      if (!a || (b.t || 0) > (a.t || 0)) { state.prog[id] = b; changed++; }
+    });
+    Object.keys(state.prog).forEach(function (id) {
+      var a = state.prog[id];
+      if (a && (a.t || 0) <= cut) { delete state.prog[id]; changed++; }
+    });
+    return changed;
+  }
+
+  /* 合并之后，本地是否还有更新的标记需要回传（避免每次开页面都白写一次 Gist） */
+  function ghNeedsPush(remote, remoteResetAt) {
+    if ((state.resetAt || 0) > (remoteResetAt || 0)) return true;
+    var ids = Object.keys(state.prog);
+    for (var i = 0; i < ids.length; i++) {
+      var a = state.prog[ids[i]], b = (remote || {})[ids[i]];
+      if (!a) continue;
+      if (!b || (a.t || 0) > (b.t || 0)) return true;
+    }
+    return false;
+  }
+
   function ghPush(silent) {
+    if (!ghSupported()) { if (!silent) toast('当前浏览器不支持同步'); return Promise.resolve(); }
     if (!state.gh.token) { if (!silent) toast('请先填写 GitHub Token'); return Promise.resolve(); }
     if (state.ghBusy) return Promise.resolve();
     state.ghBusy = true;
     ghStatus('同步中', 'busy');
-    var p = state.gh.gistId ? Promise.resolve({ id: state.gh.gistId }) : ghCreateGist();
+    var merged = 0;
+    /* 先拉一次再推：把云端比本地新的标记合并进来，避免覆盖另一台设备 */
+    var p = state.gh.gistId
+      ? ghRead().then(function (res) {
+          if (res) merged = ghMerge(res.prog, res.resetAt);
+          return { id: state.gh.gistId };
+        })
+      : ghCreateGist();
     return p.then(function (g) {
       var body = { files: (function () { var o = {}; o[GH_FILE] = { content: ghPayload() }; return o; })() };
       return ghFetch(GH_API + '/gists/' + g.id, { method: 'PATCH', headers: ghHeaders(), body: JSON.stringify(body) });
     }).then(function (g) {
       state.gh.gistId = g.id || state.gh.gistId;
       ghSave();
-      ghStatus('已同步到 Gist', '');
-      if (!silent) toast('进度已同步到你的 GitHub Gist');
+      if (merged) { saveProg(); refreshAll(); }
+      state.ghSynced = true;
+      ghStatus('已同步', '');
+      if (!silent) toast('进度已同步' + (merged ? '，并从云端合并 ' + merged + ' 条' : ''));
       renderGhBox();
     }).catch(function (e) {
       ghStatus('同步失败', 'off');
@@ -371,38 +446,39 @@
       renderGhBox();
     }).then(function () { state.ghBusy = false; });
   }
-  function ghPull() {
-    if (!state.gh.token || !state.gh.gistId) { toast('请先连接 Gist'); return Promise.resolve(); }
+
+  function ghPull(silent) {
+    if (!ghSupported()) { if (!silent) toast('当前浏览器不支持同步'); return Promise.resolve(null); }
+    if (!state.gh.token || !state.gh.gistId) {
+      if (!silent) toast('请先连接 Gist');
+      return Promise.resolve(null);
+    }
     state.ghBusy = true;
     ghStatus('读取中', 'busy');
-    return ghFetch(GH_API + '/gists/' + state.gh.gistId, { headers: ghHeaders() })
-      .then(function (g) {
-        var f = g.files && g.files[GH_FILE];
-        if (!f) throw new Error('这个 Gist 里没有进度文件');
-        var content = f.content;
-        if (f.truncated && f.raw_url) {
-          return fetch(f.raw_url).then(function (r) { return r.text(); }).then(function (t) { return t; });
-        }
-        return content;
-      })
-      .then(function (text) {
-        var obj = JSON.parse(text);
-        var remote = (obj && obj.prog) || {};
-        var merged = 0;
-        Object.keys(remote).forEach(function (id) {
-          var a = state.prog[id], b = remote[id];
-          if (!a || (b && (b.t || 0) > (a.t || 0))) { state.prog[id] = b; merged++; }
-        });
-        saveProg();
-        ghStatus('已从 Gist 拉取', '');
-        toast('已合并云端进度（' + merged + ' 条更新）');
-        refreshAll();
-      })
-      .catch(function (e) {
-        ghStatus('读取失败', 'off');
-        toast('读取失败：' + e.message);
-      })
-      .then(function () { state.ghBusy = false; });
+    return ghRead().then(function (res) {
+      if (!res) throw new Error('云端还没有进度文件');
+      var changed = ghMerge(res.prog, res.resetAt);
+      saveProg();
+      refreshAll();
+      state.ghSynced = true;
+      ghStatus('已同步', '');
+      if (!silent) toast(changed ? '已合并云端进度（' + changed + ' 条更新）' : '云端与本地一致');
+      return { changed: changed, prog: res.prog, resetAt: res.resetAt };
+    }).catch(function (e) {
+      ghStatus('读取失败', 'off');
+      if (!silent) toast('读取失败：' + e.message);
+      return null;
+    }).then(function (r) { state.ghBusy = false; return r; });
+  }
+
+  /* 打开页面时自动同步：先拉取合并，必要时把本地较新的标记回传 */
+  function ghSync() {
+    if (!state.gh.token || !state.gh.gistId || !state.gh.auto) return Promise.resolve();
+    ghStatus('同步中', 'busy');
+    return ghPull(true).then(function (res) {
+      if (!res) return;
+      if (ghNeedsPush(res.prog, res.resetAt)) return ghPush(true);
+    });
   }
   function schedulePush() {
     clearTimeout(state.pushTimer);
@@ -419,7 +495,10 @@
     var link = state.gh.gistId
       ? '<a href="https://gist.github.com/' + esc(state.gh.gistId) + '" target="_blank" rel="noopener" style="color:var(--accent)">打开 Gist</a>'
       : '<span class="muted">尚未创建 Gist</span>';
-    box.innerHTML = '<div class="muted">已填写 Token' + (state.gh.gistId ? '，Gist：' + esc(state.gh.gistId.slice(0, 8)) + '… ' + link : '，还没有创建 Gist') + '</div>';
+    box.innerHTML = '<div class="muted">已填写 Token' + (state.gh.gistId ? '，Gist：' + esc(state.gh.gistId.slice(0, 8)) + '… ' + link : '，还没有创建 Gist') + '</div>'
+      + '<div class="muted" style="margin-top:6px">' + (state.gh.auto !== false
+        ? '自动同步已开启：打开页面会先拉取并合并云端进度，标记后约 2.5 秒自动回传。'
+        : '自动同步已关闭：只能手动「上传」或「拉取」。') + '</div>';
     ghStatus(state.gh.gistId ? '已连接' : '待创建', '');
   }
 
@@ -564,6 +643,21 @@
         state.gh.token = tok.value.trim();
         ghSave();
         renderGhBox();
+        if (state.gh.token && state.gh.gistId) ghSync();
+      });
+    }
+    var gid = $('ghGist');
+    if (gid) {
+      gid.value = state.gh.gistId || '';
+      gid.addEventListener('change', function () {
+        var v = gid.value.trim();
+        /* 允许直接粘贴 https://gist.github.com/用户名/<id> */
+        var m = v.match(/([0-9a-f]{20,})/i);
+        state.gh.gistId = m ? m[1] : '';
+        gid.value = state.gh.gistId;
+        ghSave();
+        renderGhBox();
+        if (state.gh.token && state.gh.gistId) ghSync();
       });
     }
     var auto = $('ghAuto');
@@ -614,11 +708,14 @@
       return;
     }
     if (act === 'clear') {
-      if (!confirm('清空本机的学习进度？单词内容不会删除，只是掌握标记会全部重置。')) return;
+      if (!confirm('清空本机的学习进度？单词内容不会删除，只是掌握标记会全部重置。' + (state.gh.gistId ? '\n（云端 Gist 里的旧标记也会一起作废，不会被同步回来）' : ''))) return;
       state.prog = {};
+      state.resetAt = Date.now();
+      lsSet(LS_RESET, state.resetAt);
       saveProg();
       refreshAll();
       toast('已清空进度');
+      if (state.gh.auto && state.gh.token && state.gh.gistId) schedulePush();
       return;
     }
     if (act === 'ghPush') { ghPush(false); return; }
@@ -642,6 +739,7 @@
     /* 旧版进度（v1）不再使用，直接清除，保证所有词条回到「未掌握」 */
     try { localStorage.removeItem(LS_PROG_OLD); } catch (e) {}
     state.prog = lsGet(LS_PROG, {}) || {};
+    state.resetAt = lsGet(LS_RESET, 0) || 0;
     var gh = lsGet(LS_GH, null);
     if (gh && gh.token) state.gh = { token: gh.token, gistId: gh.gistId || '', auto: gh.auto !== false };
 
@@ -657,6 +755,8 @@
       try { window.speechSynthesis.onvoiceschanged = loadVoices; } catch (e) { /* 忽略 */ }
     }
     pickReview(false);
+    /* 打开即自动同步：先拉取合并云端进度，本地有较新标记再回传 */
+    ghSync();
     if (!lsGet('en_visited', false)) {
       lsSet('en_visited', true);
       setTimeout(function () { toast('数据已加载：' + (INDEX.words.length + INDEX.talks.length) + ' 条，进度存在本机'); }, 600);

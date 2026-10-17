@@ -150,6 +150,10 @@
             <label for="ghToken">GitHub Personal Access Token（只需 gist 权限）</label>
             <input id="ghToken" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false" />
           </div>
+          <div class="field">
+            <label for="ghGist">Gist ID（换设备时粘贴已有的 Gist 地址或 ID，保存后立即拉取）</label>
+            <input id="ghGist" type="text" placeholder="例如 6a1b2c3d… 或 https://gist.github.com/你的用户名/6a1b2c3d…" autocomplete="off" spellcheck="false" />
+          </div>
           <div class="row" style="margin-bottom:12px">
             <button class="btn ghost" data-act="ghTest">验证 Token</button>
             <button class="btn dark" data-act="ghPush">上传进度到 Gist</button>
@@ -158,7 +162,8 @@
           <div id="ghBox"></div>
           <div class="muted" style="margin-top:10px">
             说明：进度会写进你自己账号下的一个<strong>私有 Gist</strong>，不经过任何第三方服务器；
-            Token 只存在这台设备的浏览器里，不会上传。在
+            Token 只存在这台设备的浏览器里，不会上传。开启「自动同步」后，<strong>每次打开页面会自动拉取并合并云端进度</strong>，
+            标记单词后约 2.5 秒自动回传；上传前会先合并云端，不会覆盖别的设备。换设备时把 Gist 地址粘到上面的输入框即可接着学。在
             <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=English%20Workstation" target="_blank" rel="noopener" style="color:var(--accent)">这里</a>
             生成（勾选 <code>gist</code> 即可）。
           </div>
