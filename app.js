@@ -651,6 +651,18 @@
           push('云端标记：' + Object.keys(res.prog).length + ' 条');
           push('云端 resetAt：' + (res.resetAt || 0));
           push('结论：' + (ghNeedsPush(res.prog, res.resetAt) ? '本地有更新，需要回传' : '两端一致或云端更新'));
+          var maxT = 0;
+          Object.keys(res.prog).forEach(function (id) {
+            var t = (res.prog[id] || {}).t || 0;
+            if (t > maxT) maxT = t;
+          });
+          if (maxT) {
+            push('云端最新标记时间：' + new Date(maxT).toLocaleString());
+            if (maxT > Date.now() + 300000) {
+              push('⚠ 云端存在「未来」时间戳（比本机早 ' + Math.round((maxT - Date.now()) / 60000) +
+                   ' 分钟）：某台设备的系统时间超前，它的标记会一直被判为更新，导致本机新标记被忽略。请把那台设备的时间校对为自动同步。');
+            }
+          }
         } else {
           push('云端标记：读取失败');
         }
