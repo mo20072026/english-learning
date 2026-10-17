@@ -1,4 +1,4 @@
-# 英语学习工作台 · 四六级进阶
+# 英语学习工作台 · 四六级/雅思进阶
 
 **在线使用：https://mo20072026.github.io/english-learning/**
 
@@ -11,7 +11,7 @@
 index.html    页面骨架（无外部依赖，只有一个自绘 favicon）
 style.css     样式
 app.js        全部逻辑：筛选、复习、朗读、进度、Gist 同步
-data.js       词条数据（9899 条，构建时烘焙成 JS，约 2.7 MB）
+data.js       词条数据（16487 条，构建时烘焙成 JS，约 4 MB）
 .nojekyll     告诉 GitHub Pages 不要走 Jekyll 处理
 ```
 
