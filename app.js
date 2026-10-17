@@ -23,6 +23,7 @@
     page: { words: PAGE, talks: PAGE },
     prog: {},
     resetAt: 0,
+    ttsDisabled: false,
     gh: { token: '', gistId: '', auto: true },
     review: [],
     reviewSeen: [],
@@ -135,7 +136,7 @@
   /* ---------------- 渲染：列表 ---------------- */
   function sayBtn(id, text) {
     if (!text) return '';
-    return '<button class="btn ghost sm" data-say="' + esc(text) + '" title="朗读">🔊</button>';
+    return '<button class="btn ghost sm say" data-say="' + esc(text) + '" title="朗读"><svg class="i-say" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 9H3a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h2l4 4V5L5 9zm7 0a3.5 3.5 0 0 1 0 6.5v-2a1.5 1.5 0 0 0 0-3v-1.5zm3.5-3A7 7 0 0 1 15.5 19v-1.8a5.2 5.2 0 0 0 0-9.8V6z" fill="currentColor"/></svg></button>';
   }
 
   function itemHtml(it, kind) {
@@ -276,33 +277,38 @@
     if (nt) nt.textContent = t;
   }
 
-  /* ---------------- 朗读 ---------------- */
-  var voices = [];
-  function loadVoices() {
-    try { voices = window.speechSynthesis.getVoices() || []; } catch (e) { voices = []; }
+  /* ---------------- 朗读（音频 TTS） ---------------- */
+  function sayDisabled() { return state.ttsDisabled || lsGet('en_tts_disabled', false); }
+  function hideSayBtns() {
+    state.ttsDisabled = true;
+    lsSet('en_tts_disabled', true);
+    document.body.classList.add('say-hidden');
+    toast('当前环境无法朗读，已隐藏朗读按钮');
   }
-  function pickVoice() {
-    if (!voices.length) loadVoices();
-    var i;
-    for (i = 0; i < voices.length; i++) if (/en[-_]US/i.test(voices[i].lang)) return voices[i];
-    for (i = 0; i < voices.length; i++) if (/^en/i.test(voices[i].lang)) return voices[i];
-    return null;
+  function showSayBtns() {
+    state.ttsDisabled = false;
+    lsSet('en_tts_disabled', false);
+    document.body.classList.remove('say-hidden');
   }
+  function canPlayAudio() { return typeof Audio === 'function'; }
   function speak(text) {
     if (!text) return;
-    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
-      toast('当前浏览器不支持朗读，建议用 Chrome / Edge / Safari');
-      return;
+    if (sayDisabled() || !canPlayAudio()) return;
+    var url = 'https://dict.youdao.com/dictvoice?audio=' + encodeURIComponent(text) + '&type=1';
+    var a = new Audio(url);
+    var failed = false;
+    function fail(msg) {
+      if (failed) return;
+      failed = true;
+      a.pause();
+      hideSayBtns();
     }
-    try {
-      window.speechSynthesis.cancel();
-      var u = new SpeechSynthesisUtterance(text);
-      u.lang = 'en-US';
-      u.rate = 0.92;
-      var v = pickVoice();
-      if (v) u.voice = v;
-      window.speechSynthesis.speak(u);
-    } catch (e) { toast('朗读失败，请换个浏览器试试'); }
+    a.addEventListener('error', function () { fail('audio error'); });
+    var p;
+    try { p = a.play(); } catch (e) { fail(e.message); return; }
+    if (p && typeof p.then === 'function') {
+      p.catch(function (e) { fail(e.message); });
+    }
   }
 
   /* ---------------- GitHub Gist 同步 ---------------- */
@@ -750,9 +756,8 @@
     switchView('words');
     bind();
 
-    if (window.speechSynthesis) {
-      loadVoices();
-      try { window.speechSynthesis.onvoiceschanged = loadVoices; } catch (e) { /* 忽略 */ }
+    if (sayDisabled() || !canPlayAudio()) {
+      document.body.classList.add('say-hidden');
     }
     pickReview(false);
     /* 打开即自动同步：先拉取合并云端进度，本地有较新标记再回传 */
