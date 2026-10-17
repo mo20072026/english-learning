@@ -146,13 +146,17 @@
           </label>
         </div>
         <div class="card-b">
+          <div class="muted" style="margin-bottom:12px">
+            <strong>只要填 Token。</strong>每台设备填<strong>同一个</strong> Token，页面会在你的账号下自动找到（或创建）那个备份文件，
+            各设备的进度自动互相同步，不用复制任何 ID。
+          </div>
           <div class="field">
-            <label for="ghToken">GitHub Personal Access Token（只需 gist 权限）</label>
+            <label for="ghToken">GitHub Personal Access Token（只勾 gist 权限）</label>
             <input id="ghToken" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false" />
           </div>
           <div class="field">
-            <label for="ghGist">Gist ID（换设备时粘贴已有的 Gist 地址或 ID，保存后立即拉取）</label>
-            <input id="ghGist" type="text" placeholder="例如 6a1b2c3d… 或 https://gist.github.com/你的用户名/6a1b2c3d…" autocomplete="off" spellcheck="false" />
+            <label for="ghGist">Gist ID（<strong>留空即可</strong>，通常不用管；只有想指定另一个 Gist 时才填）</label>
+            <input id="ghGist" type="text" placeholder="留空；也可粘贴 https://gist.github.com/你的用户名/6a1b2c3d…" autocomplete="off" spellcheck="false" />
           </div>
           <div class="row" style="margin-bottom:12px">
             <button class="btn ghost" data-act="ghTest">验证 Token</button>
@@ -162,7 +166,7 @@
           <div id="ghBox"></div>
 
           <div class="field" style="margin-top:12px">
-            <label for="ghCode">同步码 / 同步链接（换设备用，二选一）</label>
+            <label for="ghCode">同步码（可选，省得新设备再找 Token）</label>
             <input id="ghCode" type="text" placeholder="粘贴 ENSYNC1.… 或带 ?sync= 的网址，回车即可接入" autocomplete="off" spellcheck="false" />
           </div>
           <div class="row" style="margin-bottom:12px">
@@ -180,8 +184,8 @@
             后台每 60 秒再对齐一次；标记单词后约 2.5 秒自动回传，切走或关闭页面前会立刻补推一次。上传前永远先合并，不会覆盖别的设备。
           </div>
           <div class="muted" style="margin-top:8px">
-            <strong>换设备只需一步</strong>：在老设备点「复制同步码」（或「复制同步链接」），在新设备的上面输入框粘贴后回车，即可自动接入并立刻拉取进度。
-            同步码里含你的 Token，属于私人信息，请不要发到公开场合。
+            <strong>换设备</strong>：在新设备填同一个 Token 即可，什么都不用复制。若懒得再翻 Token，可在老设备点「复制同步码」（或「复制同步链接」），
+            在新设备上面输入框粘贴回车，同样自动接入。同步码里含你的 Token，属私人信息，请不要发到公开场合。
           </div>
           <div class="muted" style="margin-top:8px">
             Token 在

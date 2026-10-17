@@ -32,6 +32,7 @@
     ghBusy: false,
     ghSynced: false,
     ghLastSync: 0,
+    ghFindAt: 0,
     pushTimer: null,
     pollTimer: null
   };
@@ -90,7 +91,7 @@
     state.prog[id].t = Date.now();
     saveProg();
     if (opts.silent !== true) toast('已标记为「' + levelName(lv) + '」');
-    if (state.gh.auto && state.gh.token && state.gh.gistId) schedulePush();
+    if (state.gh.auto && state.gh.token) schedulePush();
   }
   function saveProg() {
     if (!lsSet(LS_PROG, state.prog)) toast('本地存储空间不足，进度未能保存');
@@ -389,6 +390,40 @@
       return r.json();
     });
   }
+  /* 只用 Token 也能同步：按用途在账号下自动找出备份用的那个 Gist（各设备同一个 Token → 同一个 Gist） */
+  function ghFindGist() {
+    return ghFetch(GH_API + '/gists?per_page=100', { headers: ghHeaders() })
+      .then(function (list) {
+        var best = null, bestScore = 0;
+        (Array.isArray(list) ? list : []).forEach(function (g) {
+          if (!g || !g.files || !g.files[GH_FILE]) return;
+          var score = ((g.description || '').indexOf('英语学习') >= 0) ? 2 : 1;
+          if (!best || score > bestScore ||
+              (score === bestScore && String(g.updated_at || '') > String(best.updated_at || ''))) {
+            best = g; bestScore = score;
+          }
+        });
+        return best ? best.id : '';
+      })
+      .catch(function () { return ''; });
+  }
+  /* 没有 Gist ID 时先去账号里找一次（5 分钟内不重复查找）；找到就写入配置 */
+  function ghEnsureGist() {
+    if (state.gh.gistId) return Promise.resolve(state.gh.gistId);
+    if (!state.gh.token) return Promise.resolve('');
+    if (state.ghFindAt && Date.now() - state.ghFindAt < 300000) return Promise.resolve('');
+    return ghFindGist().then(function (id) {
+      state.ghFindAt = Date.now();
+      if (id) {
+        state.gh.gistId = id;
+        ghSave();
+        var gid = $('ghGist');
+        if (gid) gid.value = id;
+        renderGhBox();
+      }
+      return state.gh.gistId || '';
+    });
+  }
   function ghCreateGist() {
     return ghFetch(GH_API + '/gists', {
       method: 'POST',
@@ -469,12 +504,14 @@
     ghStatus('同步中', 'busy');
     var merged = 0;
     /* 先拉一次再推：把云端比本地新的标记合并进来，避免覆盖另一台设备 */
-    var p = state.gh.gistId
-      ? ghRead().then(function (res) {
-          if (res) merged = ghMerge(res.prog, res.resetAt);
-          return { id: state.gh.gistId };
-        })
-      : ghCreateGist();
+    var p = ghEnsureGist().then(function () {
+      return state.gh.gistId
+        ? ghRead().then(function (res) {
+            if (res) merged = ghMerge(res.prog, res.resetAt);
+            return { id: state.gh.gistId };
+          })
+        : ghCreateGist();
+    });
     return p.then(function (g) {
       var body = { files: (function () { var o = {}; o[GH_FILE] = { content: ghPayload() }; return o; })() };
       return ghFetch(GH_API + '/gists/' + g.id, { method: 'PATCH', headers: ghHeaders(), body: JSON.stringify(body) });
@@ -523,13 +560,20 @@
 
   /* 打开页面 / 回到前台 / 定时触发的自动同步：先拉取合并，必要时把本地较新的标记回传 */
   function ghSync(force) {
-    if (!state.gh.auto || !state.gh.token || !state.gh.gistId) return Promise.resolve();
+    if (!state.gh.auto || !state.gh.token) return Promise.resolve();
     if (state.ghBusy) return Promise.resolve();
     if (!force && state.ghLastSync && Date.now() - state.ghLastSync < POLL_MIN_GAP) return Promise.resolve();
     ghStatus('同步中', 'busy');
-    return ghPull(true).then(function (res) {
-      if (!res) return;
-      if (ghNeedsPush(res.prog, res.resetAt)) return ghPush(true);
+    return ghEnsureGist().then(function () {
+      if (!state.gh.gistId) {          /* 账号下还没有备份 Gist：等第一次标记单词时自动创建 */
+        ghStatus('待创建', '');
+        renderGhBox();
+        return;
+      }
+      return ghPull(true).then(function (res) {
+        if (!res) return;
+        if (ghNeedsPush(res.prog, res.resetAt)) return ghPush(true);
+      });
     }).catch(function () { /* 自动同步静默失败，不打扰学习 */ });
   }
   function schedulePush() {
@@ -538,7 +582,7 @@
   }
   /* 离开页面时把还没回传的标记立刻推上去（不等 2.5 秒） */
   function flushPush() {
-    if (!state.gh.auto || !state.gh.token || !state.gh.gistId) return;
+    if (!state.gh.auto || !state.gh.token) return;
     clearTimeout(state.pushTimer);
     ghPush(true);
   }
@@ -638,14 +682,17 @@
     var box = $('ghBox');
     if (!box) return;
     if (!state.gh.token) {
-      box.innerHTML = '<div class="muted">未连接。填写 Token 后可把进度存到你自己的 GitHub（私有 Gist），换设备也能接着学。</div>';
+      box.innerHTML = '<div class="muted">未连接。填一次 Token（每台设备填<b>同一个</b>），各设备的学习进度就会自动互相同步。</div>';
       ghStatus('未连接', 'off');
       return;
     }
     var link = state.gh.gistId
       ? '<a href="https://gist.github.com/' + esc(state.gh.gistId) + '" target="_blank" rel="noopener" style="color:var(--accent)">打开 Gist</a>'
       : '<span class="muted">尚未创建 Gist</span>';
-    box.innerHTML = '<div class="muted">已填写 Token' + (state.gh.gistId ? '，Gist：' + esc(state.gh.gistId.slice(0, 8)) + '… ' + link : '，还没有创建 Gist') + '</div>'
+    var head = state.gh.gistId
+      ? '<div class="muted">已连接备份 Gist：' + esc(state.gh.gistId.slice(0, 8)) + '… ' + link + '</div>'
+      : '<div class="muted">账号下还没找到备份文件，标记任意单词后会自动创建，不用手动填 ID。</div>';
+    box.innerHTML = head
       + '<div class="muted" style="margin-top:6px">' + (state.gh.auto !== false
         ? '自动同步已开启：打开页面、切回本页、恢复网络都会自动对齐，后台每 60 秒检查一次，标记单词后约 2.5 秒自动回传。'
         : '自动同步已关闭：只能手动「上传」或「拉取」。') + '</div>'
@@ -794,7 +841,7 @@
         state.gh.token = tok.value.trim();
         ghSave();
         renderGhBox();
-        if (state.gh.token && state.gh.gistId) ghSync(true);
+        if (state.gh.token) ghSync(true);
       });
     }
     var gid = $('ghGist');
@@ -808,7 +855,7 @@
         gid.value = state.gh.gistId;
         ghSave();
         renderGhBox();
-        if (state.gh.token && state.gh.gistId) ghSync(true);
+        if (state.gh.token) ghSync(true);
       });
     }
     var auto = $('ghAuto');
@@ -874,7 +921,7 @@
       saveProg();
       refreshAll();
       toast('已清空进度');
-      if (state.gh.auto && state.gh.token && state.gh.gistId) schedulePush();
+      if (state.gh.auto && state.gh.token) schedulePush();
       return;
     }
     if (act === 'ghPush') { ghPush(false); return; }
