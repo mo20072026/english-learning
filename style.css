@@ -180,4 +180,5 @@ input,select,textarea{font-family:inherit;font-size:16px}
 }
 @media (max-width:640px){
   .grid2{grid-template-columns:1fr}
+  .today .hint{display:none}
 }
