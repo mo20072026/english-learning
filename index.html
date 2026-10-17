@@ -160,10 +160,31 @@
             <button class="btn ghost" data-act="ghPull">从 Gist 拉取</button>
           </div>
           <div id="ghBox"></div>
+
+          <div class="field" style="margin-top:12px">
+            <label for="ghCode">同步码 / 同步链接（换设备用，二选一）</label>
+            <input id="ghCode" type="text" placeholder="粘贴 ENSYNC1.… 或带 ?sync= 的网址，回车即可接入" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="row" style="margin-bottom:12px">
+            <button class="btn dark" data-act="ghCopyCode">复制同步码</button>
+            <button class="btn ghost" data-act="ghCopyLink">复制同步链接</button>
+            <button class="btn ghost" data-act="ghImportCode">用同步码接入</button>
+          </div>
+
           <div class="muted" style="margin-top:10px">
             说明：进度会写进你自己账号下的一个<strong>私有 Gist</strong>，不经过任何第三方服务器；
-            Token 只存在这台设备的浏览器里，不会上传。开启「自动同步」后，<strong>每次打开页面会自动拉取并合并云端进度</strong>，
-            标记单词后约 2.5 秒自动回传；上传前会先合并云端，不会覆盖别的设备。换设备时把 Gist 地址粘到上面的输入框即可接着学。在
+            Token 只存在这台设备的浏览器里，不会上传。
+          </div>
+          <div class="muted" style="margin-top:8px">
+            <strong>自动同步（开启后完全不用管）</strong>：打开页面、从别的标签页切回来、手机回到前台、断网恢复——都会自动拉取并合并云端进度；
+            后台每 60 秒再对齐一次；标记单词后约 2.5 秒自动回传，切走或关闭页面前会立刻补推一次。上传前永远先合并，不会覆盖别的设备。
+          </div>
+          <div class="muted" style="margin-top:8px">
+            <strong>换设备只需一步</strong>：在老设备点「复制同步码」（或「复制同步链接」），在新设备的上面输入框粘贴后回车，即可自动接入并立刻拉取进度。
+            同步码里含你的 Token，属于私人信息，请不要发到公开场合。
+          </div>
+          <div class="muted" style="margin-top:8px">
+            Token 在
             <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=English%20Workstation" target="_blank" rel="noopener" style="color:var(--accent)">这里</a>
             生成（勾选 <code>gist</code> 即可）。
           </div>
@@ -176,7 +197,7 @@
           <ul class="src">
             <li><b>内容</b>：电气专业词汇、空调制冷词汇、商务口语 900 句、常用口语 1000 句、日常生活词汇大全，共 <b id="st-total2">0</b> 条，7 个分类、120+ 子类。</li>
             <li><b>发音</b>：点击朗读图标依次尝试有道、百度在线语音；长句自动截取前 160 字符；单个音源失败会自动换下一个，只有连续多次都失败才会隐藏朗读按钮。</li>
-            <li><b>数据</b>：本页面不含任何后端与账号体系，断网也能用；学习进度默认只存在本机 localStorage。</li>
+            <li><b>数据</b>：本页面不含任何后端与账号体系，断网也能用；学习进度默认只存在本机 localStorage，配置后可自动同步到你自己的私有 Gist。</li>
             <li><b>没有 AI 对话</b>：已按要求移除，页面不再加载任何云服务 SDK。</li>
           </ul>
         </div>

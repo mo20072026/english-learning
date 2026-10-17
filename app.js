@@ -11,6 +11,7 @@
   var LS_PROG_OLD = 'en_prog_v1';
   var LS_GH = 'en_gh_v1';
   var LS_RESET = 'en_prog_reset_v1';   /* 最近一次「清空进度」的时间戳，同步时用来压过云端旧标记 */
+  var LS_LASTSYNC = 'en_sync_at_v1';   /* 最近一次成功同步的时间，仅用于展示 */
   var PAGE = 40;
   var REVIEW_N = 10;
 
@@ -30,8 +31,13 @@
     reviewSeen: [],
     ghBusy: false,
     ghSynced: false,
-    pushTimer: null
+    ghLastSync: 0,
+    pushTimer: null,
+    pollTimer: null
   };
+  var SYNC_PREFIX = 'ENSYNC1.';
+  var POLL_MS = 60000;        /* 后台轮询间隔：页面可见时每 60 秒对齐一次 */
+  var POLL_MIN_GAP = 25000;   /* 两次同步之间的最小间隔，避免切标签页时频繁打接口 */
 
   /* ---------------- 工具 ---------------- */
   function $(id) { return document.getElementById(id); }
@@ -477,6 +483,8 @@
       ghSave();
       if (merged) { saveProg(); refreshAll(); }
       state.ghSynced = true;
+      state.ghLastSync = Date.now();
+      lsSet(LS_LASTSYNC, state.ghLastSync);
       ghStatus('已同步', '');
       if (!silent) toast('进度已同步' + (merged ? '，并从云端合并 ' + merged + ' 条' : ''));
       renderGhBox();
@@ -499,8 +507,10 @@
       if (!res) throw new Error('云端还没有进度文件');
       var changed = ghMerge(res.prog, res.resetAt);
       saveProg();
-      refreshAll();
+      if (changed) refreshAll();          /* 没有变化时不做重渲染，避免打断正在看的列表 */
       state.ghSynced = true;
+      state.ghLastSync = Date.now();
+      lsSet(LS_LASTSYNC, state.ghLastSync);
       ghStatus('已同步', '');
       if (!silent) toast(changed ? '已合并云端进度（' + changed + ' 条更新）' : '云端与本地一致');
       return { changed: changed, prog: res.prog, resetAt: res.resetAt };
@@ -511,18 +521,118 @@
     }).then(function (r) { state.ghBusy = false; return r; });
   }
 
-  /* 打开页面时自动同步：先拉取合并，必要时把本地较新的标记回传 */
-  function ghSync() {
-    if (!state.gh.token || !state.gh.gistId || !state.gh.auto) return Promise.resolve();
+  /* 打开页面 / 回到前台 / 定时触发的自动同步：先拉取合并，必要时把本地较新的标记回传 */
+  function ghSync(force) {
+    if (!state.gh.auto || !state.gh.token || !state.gh.gistId) return Promise.resolve();
+    if (state.ghBusy) return Promise.resolve();
+    if (!force && state.ghLastSync && Date.now() - state.ghLastSync < POLL_MIN_GAP) return Promise.resolve();
     ghStatus('同步中', 'busy');
     return ghPull(true).then(function (res) {
       if (!res) return;
       if (ghNeedsPush(res.prog, res.resetAt)) return ghPush(true);
-    });
+    }).catch(function () { /* 自动同步静默失败，不打扰学习 */ });
   }
   function schedulePush() {
     clearTimeout(state.pushTimer);
     state.pushTimer = setTimeout(function () { ghPush(true); }, 2500);
+  }
+  /* 离开页面时把还没回传的标记立刻推上去（不等 2.5 秒） */
+  function flushPush() {
+    if (!state.gh.auto || !state.gh.token || !state.gh.gistId) return;
+    clearTimeout(state.pushTimer);
+    ghPush(true);
+  }
+
+  /* ---------------- 同步码：换设备时一次粘贴即可接入 ---------------- */
+  function makeSyncCode() {
+    var json = JSON.stringify({ t: state.gh.token || '', g: state.gh.gistId || '' });
+    var b64 = btoa(unescape(encodeURIComponent(json))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return SYNC_PREFIX + b64;
+  }
+  function parseSyncCode(code) {
+    var v = String(code || '').trim();
+    if (!v) throw new Error('同步码为空');
+    if (v.indexOf(SYNC_PREFIX) === 0) v = v.slice(SYNC_PREFIX.length);
+    v = v.replace(/-/g, '+').replace(/_/g, '/');
+    while (v.length % 4) v += '=';
+    var obj = JSON.parse(decodeURIComponent(escape(atob(v))));
+    if (!obj || !obj.t) throw new Error('同步码不完整');
+    return { token: obj.t, gistId: obj.g || '' };
+  }
+  function applySyncCode(code, quiet) {
+    var cfg;
+    try { cfg = parseSyncCode(code); } catch (e) { toast('同步码无法识别：' + e.message); return false; }
+    state.gh.token = cfg.token;
+    state.gh.gistId = cfg.gistId;
+    state.gh.auto = true;
+    ghSave();
+    var tok = $('ghToken'), gid = $('ghGist'), auto = $('ghAuto');
+    if (tok) tok.value = cfg.token;
+    if (gid) gid.value = cfg.gistId;
+    if (auto) auto.checked = true;
+    renderGhBox();
+    if (!quiet) toast('已接入同步，正在拉取进度…');
+    ghSync(true);
+    return true;
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () { return fallbackCopy(text); });
+    }
+    return Promise.resolve(fallbackCopy(text));
+  }
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) { return false; }
+  }
+  /* 带同步码的网址：另一台设备打开即自动接入（导入后立刻把码从地址栏抹掉） */
+  function syncLink() {
+    var base = location.origin + location.pathname;
+    return base + '?sync=' + encodeURIComponent(makeSyncCode());
+  }
+  function consumeUrlSyncCode() {
+    try {
+      var m = location.search.match(/[?&]sync=([^&]+)/);
+      if (!m) return false;
+      var code = decodeURIComponent(m[1]);
+      history.replaceState(null, '', location.pathname + (location.hash || ''));
+      return applySyncCode(code, true);
+    } catch (e) { return false; }
+  }
+
+  /* ---------------- 后台自动同步：回到前台 / 恢复网络 / 定时 / 离开页面 ---------------- */
+  function startAutoSync() {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') ghSync();
+      else flushPush();                 /* 切走或锁屏时立刻回传未上传的标记 */
+    });
+    window.addEventListener('pagehide', flushPush);
+    window.addEventListener('online', function () { ghSync(true); });
+    window.addEventListener('offline', function () { ghStatus('离线', 'off'); });
+    window.addEventListener('beforeunload', flushPush);
+    clearInterval(state.pollTimer);
+    state.pollTimer = setInterval(function () {
+      if (document.visibilityState === 'visible') ghSync();
+    }, POLL_MS);
+  }
+
+  function syncAgoText() {
+    if (!state.ghLastSync) return '';
+    var s = Math.floor((Date.now() - state.ghLastSync) / 1000);
+    if (s < 5) return '刚刚同步';
+    if (s < 60) return s + ' 秒前同步';
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + ' 分钟前同步';
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + ' 小时前同步';
+    return new Date(state.ghLastSync).toLocaleString() + ' 同步';
   }
   function renderGhBox() {
     var box = $('ghBox');
@@ -537,8 +647,9 @@
       : '<span class="muted">尚未创建 Gist</span>';
     box.innerHTML = '<div class="muted">已填写 Token' + (state.gh.gistId ? '，Gist：' + esc(state.gh.gistId.slice(0, 8)) + '… ' + link : '，还没有创建 Gist') + '</div>'
       + '<div class="muted" style="margin-top:6px">' + (state.gh.auto !== false
-        ? '自动同步已开启：打开页面会先拉取并合并云端进度，标记后约 2.5 秒自动回传。'
-        : '自动同步已关闭：只能手动「上传」或「拉取」。') + '</div>';
+        ? '自动同步已开启：打开页面、切回本页、恢复网络都会自动对齐，后台每 60 秒检查一次，标记单词后约 2.5 秒自动回传。'
+        : '自动同步已关闭：只能手动「上传」或「拉取」。') + '</div>'
+      + (state.ghLastSync ? '<div class="muted" style="margin-top:6px">上次同步：' + esc(syncAgoText()) + '</div>' : '');
     ghStatus(state.gh.gistId ? '已连接' : '待创建', '');
   }
 
@@ -683,7 +794,7 @@
         state.gh.token = tok.value.trim();
         ghSave();
         renderGhBox();
-        if (state.gh.token && state.gh.gistId) ghSync();
+        if (state.gh.token && state.gh.gistId) ghSync(true);
       });
     }
     var gid = $('ghGist');
@@ -697,7 +808,7 @@
         gid.value = state.gh.gistId;
         ghSave();
         renderGhBox();
-        if (state.gh.token && state.gh.gistId) ghSync();
+        if (state.gh.token && state.gh.gistId) ghSync(true);
       });
     }
     var auto = $('ghAuto');
@@ -706,6 +817,14 @@
       auto.addEventListener('change', function () {
         state.gh.auto = auto.checked;
         ghSave();
+        renderGhBox();
+        if (state.gh.auto) ghSync(true);   /* 打开开关时立刻对齐一次 */
+      });
+    }
+    var codeBox = $('ghCode');
+    if (codeBox) {
+      codeBox.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doAction('ghImportCode'); }
       });
     }
 
@@ -760,6 +879,40 @@
     }
     if (act === 'ghPush') { ghPush(false); return; }
     if (act === 'ghPull') { ghPull(); return; }
+    if (act === 'ghCopyCode') {
+      if (!state.gh.token) { toast('请先填写 Token 并成功同步一次'); return; }
+      var code = makeSyncCode();
+      copyText(code).then(function (ok) {
+        if (ok) { toast('同步码已复制，粘到新设备即可'); return; }
+        var box = $('ghCode');
+        if (box) { box.value = code; box.select(); }
+        toast('已生成同步码，请手动复制上方文本框内容');
+      });
+      return;
+    }
+    if (act === 'ghCopyLink') {
+      if (!state.gh.token) { toast('请先填写 Token 并成功同步一次'); return; }
+      var url = syncLink();
+      copyText(url).then(function (ok) {
+        if (ok) { toast('同步链接已复制，另一台设备打开即自动接入'); return; }
+        var box = $('ghCode');
+        if (box) { box.value = url; box.select(); }
+        toast('已生成同步链接，请手动复制上方文本框内容');
+      });
+      return;
+    }
+    if (act === 'ghImportCode') {
+      var inp = $('ghCode');
+      var v = inp ? inp.value : '';
+      if (!v.trim()) { toast('请先粘贴同步码或同步链接'); return; }
+      var m = v.match(/[?&]sync=([^&\s]+)/);
+      var raw = m ? decodeURIComponent(m[1]) : v;
+      if (applySyncCode(raw, false) && inp) {
+        inp.value = '';
+        inp.placeholder = '已接入，可留空';
+      }
+      return;
+    }
     if (act === 'ghTest') {
       if (!state.gh.token) { toast('请先填写 Token'); return; }
       ghStatus('验证中', 'busy');
@@ -782,6 +935,7 @@
     state.resetAt = lsGet(LS_RESET, 0) || 0;
     var gh = lsGet(LS_GH, null);
     if (gh && gh.token) state.gh = { token: gh.token, gistId: gh.gistId || '', auto: gh.auto !== false };
+    state.ghLastSync = lsGet(LS_LASTSYNC, 0) || 0;
 
     buildIndex();
     fillCats('words'); fillSubs('words');
@@ -799,8 +953,10 @@
       document.body.classList.add('say-hidden');
     }
     pickReview(false);
-    /* 打开即自动同步：先拉取合并云端进度，本地有较新标记再回传 */
-    ghSync();
+    /* 若网址里带了同步码（另一台设备打开同步链接），先接入再同步；否则按本机配置直接同步 */
+    if (!consumeUrlSyncCode()) ghSync();
+    /* 后台自动同步：切回前台 / 恢复网络 / 每 60 秒 / 离开页面前 */
+    startAutoSync();
     if (!lsGet('en_visited', false)) {
       lsSet('en_visited', true);
       setTimeout(function () { toast('数据已加载：' + (INDEX.words.length + INDEX.talks.length) + ' 条，进度存在本机'); }, 600);
@@ -810,5 +966,9 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 
-  window.__EN__ = { state: state, renderList: renderList, pickReview: pickReview, setLevel: setLevel, speak: speak };
+  window.__EN__ = {
+    state: state, renderList: renderList, pickReview: pickReview, setLevel: setLevel, speak: speak,
+    ghSync: ghSync, ghPush: ghPush, ghPull: ghPull, flushPush: flushPush,
+    makeSyncCode: makeSyncCode, parseSyncCode: parseSyncCode, applySyncCode: applySyncCode, syncLink: syncLink
+  };
 })();
