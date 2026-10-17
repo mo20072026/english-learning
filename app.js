@@ -34,6 +34,7 @@
     ghLastSync: 0,
     ghFindAt: 0,
     ghError: '',
+    ghPushOk: null,
     __build: '20261017-3',
     pushTimer: null,
     pollTimer: null
@@ -380,8 +381,13 @@
       prog: state.prog
     });
   }
+  var ghLastHeaders = null;                       /* 记录最近一次响应的头，用于自检 Token 权限 */
+  function ghHeader(name) {
+    try { return ghLastHeaders ? (ghLastHeaders.get(name) || '') : ''; } catch (e) { return ''; }
+  }
   function ghFetch(url, opt) {
     return fetch(url, opt).then(function (r) {
+      try { ghLastHeaders = r.headers; } catch (e) { /* 某些环境取不到 */ }
       if (!r.ok) {
         return r.text().then(function (t) {
           var msg = t;
@@ -498,7 +504,7 @@
     return false;
   }
 
-  function ghPush(silent) {
+  function ghPush(silent, retry, notifyError) {
     if (!ghSupported()) { if (!silent) toast('当前浏览器不支持同步'); return Promise.resolve(); }
     if (!state.gh.token) { if (!silent) toast('请先填写 GitHub Token'); return Promise.resolve(); }
     if (state.ghBusy) return Promise.resolve();
@@ -523,14 +529,24 @@
       if (merged) { saveProg(); refreshAll(); }
       state.ghSynced = true;
       state.ghLastSync = Date.now();
+      state.ghPushOk = true;
       lsSet(LS_LASTSYNC, state.ghLastSync);
       ghStatus('已同步', '');
       if (!silent) toast('进度已同步' + (merged ? '，并从云端合并 ' + merged + ' 条' : ''));
       renderGhBox();
     }).catch(function (e) {
-      state.ghError = e && (e.message || '未知错误');
+      state.ghBusy = false;                       /* 先释放锁，便于重试 */
+      var msg = e && (e.message || '未知错误');
+      var clientErr = /HTTP 4\d\d/.test(msg);     /* 401/403 属权限问题，重试无用 */
+      if (!retry && !clientErr) {
+        /* 网络抖动、5xx、请求被系统挂起（手机锁屏常见）：3 秒后自动重试一次 */
+        return new Promise(function (r) { setTimeout(r, 3000); })
+          .then(function () { return ghPush(silent, true, notifyError); });
+      }
+      state.ghError = msg;
+      state.ghPushOk = false;
       ghStatus('同步失败', 'off');
-      if (!silent) toast('同步失败：' + e.message);
+      if (!silent || notifyError) toast('同步失败：' + msg + '（进度已存本机，稍后会自动重试）');
       renderGhBox();
     }).then(function () { state.ghBusy = false; });
   }
@@ -599,16 +615,22 @@
     push('本地 resetAt：' + (state.resetAt || 0));
     push('上次同步：' + (state.ghLastSync ? syncAgoText() : '无'));
     push('Token：' + (state.gh.token ? '已填（' + state.gh.token.slice(0, 4) + '…）' : '未填'));
+    push('最近一次上传：' + (state.ghPushOk === true ? '成功' : state.ghPushOk === false ? '失败' : '未发生过'));
     if (state.ghError) push('最近错误：' + state.ghError);
     if (!state.gh.token) {
       push('结论：Token 为空，请先生成并粘贴 Token');
       renderDiag(L.join('\n'));
       return Promise.resolve(L.join('\n'));
     }
+    var remoteProg = null, remoteReset = 0;
     ghStatus('诊断中', 'busy');
     return ghFetch(GH_API + '/user', { headers: ghHeaders() })
       .then(function (u) {
         push('账号验证：成功，' + u.login);
+        var scopes = ghHeader('x-oauth-scopes');
+        push('Token 权限：' + (scopes || '（浏览器未暴露该响应头，以下一步实测为准）'));
+        push('API 剩余额度：' + (ghHeader('x-ratelimit-remaining') || '-'));
+        if (scopes && scopes.indexOf('gist') < 0) push('⚠ Token 没有 gist 权限，只能读不能写！');
         return ghFetch(GH_API + '/gists?per_page=100', { headers: ghHeaders() });
       })
       .then(function (list) {
@@ -625,6 +647,7 @@
       })
       .then(function (res) {
         if (res) {
+          remoteProg = res.prog; remoteReset = res.resetAt || 0;
           push('云端标记：' + Object.keys(res.prog).length + ' 条');
           push('云端 resetAt：' + (res.resetAt || 0));
           push('结论：' + (ghNeedsPush(res.prog, res.resetAt) ? '本地有更新，需要回传' : '两端一致或云端更新'));
@@ -635,6 +658,22 @@
       .catch(function (e) {
         state.ghError = e && (e.message || '未知错误');
         push('诊断中断：' + state.ghError);
+      })
+      .then(function () {
+        /* 实测写入权限：有待回传的条数就真的推一次，把结果写进报告 */
+        var pending = 0;
+        Object.keys(state.prog).forEach(function (id) {
+          var a = state.prog[id], b = (remoteProg || {})[id];
+          if (a && (!b || (a.t || 0) > (b.t || 0)) && (a.t || 0) > remoteReset) pending++;
+        });
+        push('待回传：' + pending + ' 条');
+        if (!pending || !state.gh.gistId) return null;
+        return ghPush(true, true, false).then(function () {
+          push('实测上传：' + (state.ghPushOk ? '成功' : '失败 —— ' + (state.ghError || '')));
+          if (!state.ghPushOk && /HTTP 40[13]/.test(state.ghError || '')) {
+            push('⚠ 写入被拒绝：Token 权限不足或已失效，请重新生成一个勾选了 gist 的 Token');
+          }
+        });
       })
       .then(function () {
         ghStatus(state.gh.gistId ? '已连接' : '待创建', '');
@@ -653,7 +692,8 @@
 
   function schedulePush() {
     clearTimeout(state.pushTimer);
-    state.pushTimer = setTimeout(function () { ghPush(true); }, 2500);
+    /* 用户刚动过标记：这次失败要 toast 提示，否则手机上会以为同步成功了 */
+    state.pushTimer = setTimeout(function () { ghPush(true, false, true); }, 1800);
   }
   /* 离开页面时把还没回传的标记立刻推上去（不等 2.5 秒） */
   function flushPush() {
