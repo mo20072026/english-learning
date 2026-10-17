@@ -147,50 +147,43 @@
         </div>
         <div class="card-b">
           <div class="muted" style="margin-bottom:12px">
-            <strong>只要填 Token。</strong>每台设备填<strong>同一个</strong> Token，页面会在你的账号下自动找到（或创建）那个备份文件，
-            各设备的进度自动互相同步，不用复制任何 ID。
+            填<strong>同一个</strong> Token，手机和电脑就自动同步；页面会在你账号下自动找到/创建备份文件。
           </div>
           <div class="field">
-            <label for="ghToken">GitHub Personal Access Token（只勾 gist 权限）</label>
+            <label for="ghToken">GitHub Personal Access Token（只勾 gist）</label>
             <input id="ghToken" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false" />
           </div>
-          <div class="field">
-            <label for="ghGist">Gist ID（<strong>留空即可</strong>，通常不用管；只有想指定另一个 Gist 时才填）</label>
-            <input id="ghGist" type="text" placeholder="留空；也可粘贴 https://gist.github.com/你的用户名/6a1b2c3d…" autocomplete="off" spellcheck="false" />
-          </div>
           <div class="row" style="margin-bottom:12px">
-            <button class="btn ghost" data-act="ghTest">验证 Token</button>
             <button class="btn dark" data-act="ghPush">上传进度到 Gist</button>
             <button class="btn ghost" data-act="ghPull">从 Gist 拉取</button>
+            <button class="btn ghost" data-act="ghTest">验证 Token</button>
+            <button class="btn ghost" data-act="ghDiag">同步自检</button>
           </div>
-          <div id="ghBox"></div>
+          <div id="ghBox" style="margin-bottom:12px"></div>
 
-          <div class="field" style="margin-top:12px">
-            <label for="ghCode">同步码（可选，省得新设备再找 Token）</label>
-            <input id="ghCode" type="text" placeholder="粘贴 ENSYNC1.… 或带 ?sync= 的网址，回车即可接入" autocomplete="off" spellcheck="false" />
-          </div>
-          <div class="row" style="margin-bottom:12px">
-            <button class="btn dark" data-act="ghCopyCode">复制同步码</button>
-            <button class="btn ghost" data-act="ghCopyLink">复制同步链接</button>
-            <button class="btn ghost" data-act="ghImportCode">用同步码接入</button>
-          </div>
+          <details style="margin-top:8px">
+            <summary style="color:var(--accent);cursor:pointer;font-size:13px">高级：手动指定 Gist / 用同步码换设备</summary>
+            <div style="padding-top:10px">
+              <div class="field">
+                <label for="ghGist">Gist ID（留空自动查找）</label>
+                <input id="ghGist" type="text" placeholder="https://gist.github.com/用户名/6a1b2c3d…" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="field" style="margin-top:10px">
+                <label for="ghCode">同步码 / 同步链接（新设备粘贴回车即可接入）</label>
+                <input id="ghCode" type="text" placeholder="ENSYNC1.… 或 ?sync=…" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="row" style="margin-bottom:10px">
+                <button class="btn dark" data-act="ghCopyCode">复制同步码</button>
+                <button class="btn ghost" data-act="ghCopyLink">复制同步链接</button>
+                <button class="btn ghost" data-act="ghImportCode">用同步码接入</button>
+              </div>
+            </div>
+          </details>
 
-          <div class="muted" style="margin-top:10px">
-            说明：进度会写进你自己账号下的一个<strong>私有 Gist</strong>，不经过任何第三方服务器；
-            Token 只存在这台设备的浏览器里，不会上传。
-          </div>
-          <div class="muted" style="margin-top:8px">
-            <strong>自动同步（开启后完全不用管）</strong>：打开页面、从别的标签页切回来、手机回到前台、断网恢复——都会自动拉取并合并云端进度；
-            后台每 60 秒再对齐一次；标记单词后约 2.5 秒自动回传，切走或关闭页面前会立刻补推一次。上传前永远先合并，不会覆盖别的设备。
-          </div>
-          <div class="muted" style="margin-top:8px">
-            <strong>换设备</strong>：在新设备填同一个 Token 即可，什么都不用复制。若懒得再翻 Token，可在老设备点「复制同步码」（或「复制同步链接」），
-            在新设备上面输入框粘贴回车，同样自动接入。同步码里含你的 Token，属私人信息，请不要发到公开场合。
-          </div>
-          <div class="muted" style="margin-top:8px">
-            Token 在
-            <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=English%20Workstation" target="_blank" rel="noopener" style="color:var(--accent)">这里</a>
-            生成（勾选 <code>gist</code> 即可）。
+          <div class="muted" style="margin-top:12px">
+            进度存在你自己账号下的<strong>私有 Gist</strong>，不经过第三方服务器。Token 只存在这台设备的浏览器里。
+            打不开同步时点「同步自检」会生成诊断报告，看一眼就知道问题在哪。
+            <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=English%20Workstation" target="_blank" rel="noopener" style="color:var(--accent)">生成 Token</a>。
           </div>
         </div>
       </div>

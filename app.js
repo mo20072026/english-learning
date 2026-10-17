@@ -33,6 +33,8 @@
     ghSynced: false,
     ghLastSync: 0,
     ghFindAt: 0,
+    ghError: '',
+    __build: '20261017-3',
     pushTimer: null,
     pollTimer: null
   };
@@ -407,11 +409,11 @@
       })
       .catch(function () { return ''; });
   }
-  /* 没有 Gist ID 时先去账号里找一次（5 分钟内不重复查找）；找到就写入配置 */
-  function ghEnsureGist() {
+  /* 没有 Gist ID 时先去账号里找一次；force=true 时不使用缓存，用于用户手动触发 */
+  function ghEnsureGist(force) {
     if (state.gh.gistId) return Promise.resolve(state.gh.gistId);
     if (!state.gh.token) return Promise.resolve('');
-    if (state.ghFindAt && Date.now() - state.ghFindAt < 300000) return Promise.resolve('');
+    if (!force && state.ghFindAt && Date.now() - state.ghFindAt < 300000) return Promise.resolve('');
     return ghFindGist().then(function (id) {
       state.ghFindAt = Date.now();
       if (id) {
@@ -504,7 +506,7 @@
     ghStatus('同步中', 'busy');
     var merged = 0;
     /* 先拉一次再推：把云端比本地新的标记合并进来，避免覆盖另一台设备 */
-    var p = ghEnsureGist().then(function () {
+    var p = ghEnsureGist(true).then(function () {
       return state.gh.gistId
         ? ghRead().then(function (res) {
             if (res) merged = ghMerge(res.prog, res.resetAt);
@@ -526,6 +528,7 @@
       if (!silent) toast('进度已同步' + (merged ? '，并从云端合并 ' + merged + ' 条' : ''));
       renderGhBox();
     }).catch(function (e) {
+      state.ghError = e && (e.message || '未知错误');
       ghStatus('同步失败', 'off');
       if (!silent) toast('同步失败：' + e.message);
       renderGhBox();
@@ -552,6 +555,7 @@
       if (!silent) toast(changed ? '已合并云端进度（' + changed + ' 条更新）' : '云端与本地一致');
       return { changed: changed, prog: res.prog, resetAt: res.resetAt };
     }).catch(function (e) {
+      state.ghError = e && (e.message || '未知错误');
       ghStatus('读取失败', 'off');
       if (!silent) toast('读取失败：' + e.message);
       return null;
@@ -559,23 +563,94 @@
   }
 
   /* 打开页面 / 回到前台 / 定时触发的自动同步：先拉取合并，必要时把本地较新的标记回传 */
-  function ghSync(force) {
+  function ghSync(force, notify) {
     if (!state.gh.auto || !state.gh.token) return Promise.resolve();
     if (state.ghBusy) return Promise.resolve();
     if (!force && state.ghLastSync && Date.now() - state.ghLastSync < POLL_MIN_GAP) return Promise.resolve();
     ghStatus('同步中', 'busy');
-    return ghEnsureGist().then(function () {
-      if (!state.gh.gistId) {          /* 账号下还没有备份 Gist：等第一次标记单词时自动创建 */
-        ghStatus('待创建', '');
-        renderGhBox();
-        return;
+    state.ghError = '';
+    return ghEnsureGist(force).then(function () {
+      if (!state.gh.gistId) {
+        /* 账号下还没有备份：立刻用当前进度创建一个空备份，让用户看到"已连接" */
+        return ghPush(true);
       }
       return ghPull(true).then(function (res) {
         if (!res) return;
         if (ghNeedsPush(res.prog, res.resetAt)) return ghPush(true);
       });
-    }).catch(function () { /* 自动同步静默失败，不打扰学习 */ });
+    }).catch(function (e) {
+      state.ghError = e && (e.message || '未知错误');
+      ghStatus('同步失败', 'off');
+      if (notify) toast('自动同步失败：' + state.ghError);
+      renderGhBox();
+    });
   }
+  function ghDiag() {
+    var box = $('ghBox');
+    if (!box) return Promise.resolve('');
+    var L = [];
+    var push = function (s) { L.push(s); };
+    push('== 同步自检报告 ==');
+    push('时间：' + new Date().toLocaleString());
+    push('页面版本：' + (state.__build || 'unknown'));
+    push('UA：' + (navigator.userAgent || '').slice(0, 40));
+    push('自动同步：' + (state.gh.auto ? '开' : '关'));
+    push('本地标记：' + Object.keys(state.prog).length + ' 条');
+    push('本地 resetAt：' + (state.resetAt || 0));
+    push('上次同步：' + (state.ghLastSync ? syncAgoText() : '无'));
+    push('Token：' + (state.gh.token ? '已填（' + state.gh.token.slice(0, 4) + '…）' : '未填'));
+    if (state.ghError) push('最近错误：' + state.ghError);
+    if (!state.gh.token) {
+      push('结论：Token 为空，请先生成并粘贴 Token');
+      renderDiag(L.join('\n'));
+      return Promise.resolve(L.join('\n'));
+    }
+    ghStatus('诊断中', 'busy');
+    return ghFetch(GH_API + '/user', { headers: ghHeaders() })
+      .then(function (u) {
+        push('账号验证：成功，' + u.login);
+        return ghFetch(GH_API + '/gists?per_page=100', { headers: ghHeaders() });
+      })
+      .then(function (list) {
+        var arr = Array.isArray(list) ? list : [];
+        var hit = arr.filter(function (g) { return g && g.files && g.files[GH_FILE]; });
+        push('账号 Gist：' + arr.length + ' 个，含备份文件：' + hit.length + ' 个');
+        if (hit.length) hit.forEach(function (g) { push('  - ' + g.id + '（' + (g.description || '无描述') + '）'); });
+        return ghEnsureGist(true);
+      })
+      .then(function (id) {
+        push('选用 Gist：' + (id || '无'));
+        if (!id) { push('结论：账号下没有备份文件，标记任意单词后会自动创建'); return null; }
+        return ghRead();
+      })
+      .then(function (res) {
+        if (res) {
+          push('云端标记：' + Object.keys(res.prog).length + ' 条');
+          push('云端 resetAt：' + (res.resetAt || 0));
+          push('结论：' + (ghNeedsPush(res.prog, res.resetAt) ? '本地有更新，需要回传' : '两端一致或云端更新'));
+        } else {
+          push('云端标记：读取失败');
+        }
+      })
+      .catch(function (e) {
+        state.ghError = e && (e.message || '未知错误');
+        push('诊断中断：' + state.ghError);
+      })
+      .then(function () {
+        ghStatus(state.gh.gistId ? '已连接' : '待创建', '');
+        var txt = L.join('\n');
+        renderDiag(txt);
+        copyText(txt);
+        toast('诊断报告已生成');
+        return txt;
+      });
+  }
+  function renderDiag(text) {
+    var box = $('ghBox');
+    if (!box) return;
+    box.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-all;margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.6;color:var(--color-text-primary);background:var(--color-background-tertiary);padding:10px;border-radius:8px;border:0.5px solid var(--color-border-tertiary)">' + esc(text) + '</pre>';
+  }
+
   function schedulePush() {
     clearTimeout(state.pushTimer);
     state.pushTimer = setTimeout(function () { ghPush(true); }, 2500);
@@ -689,15 +764,21 @@
     var link = state.gh.gistId
       ? '<a href="https://gist.github.com/' + esc(state.gh.gistId) + '" target="_blank" rel="noopener" style="color:var(--accent)">打开 Gist</a>'
       : '<span class="muted">尚未创建 Gist</span>';
-    var head = state.gh.gistId
-      ? '<div class="muted">已连接备份 Gist：' + esc(state.gh.gistId.slice(0, 8)) + '… ' + link + '</div>'
-      : '<div class="muted">账号下还没找到备份文件，标记任意单词后会自动创建，不用手动填 ID。</div>';
+    var head;
+    if (state.gh.gistId) {
+      head = '<div class="muted">已连接备份 Gist：' + esc(state.gh.gistId.slice(0, 8)) + '… ' + link + '</div>';
+    } else if (state.ghError) {
+      head = '<div style="color:var(--color-danger)">同步失败：' + esc(state.ghError) + '</div>';
+    } else {
+      head = '<div class="muted">正在查找/创建云端备份，请稍候…</div>';
+    }
     box.innerHTML = head
       + '<div class="muted" style="margin-top:6px">' + (state.gh.auto !== false
         ? '自动同步已开启：打开页面、切回本页、恢复网络都会自动对齐，后台每 60 秒检查一次，标记单词后约 2.5 秒自动回传。'
         : '自动同步已关闭：只能手动「上传」或「拉取」。') + '</div>'
-      + (state.ghLastSync ? '<div class="muted" style="margin-top:6px">上次同步：' + esc(syncAgoText()) + '</div>' : '');
-    ghStatus(state.gh.gistId ? '已连接' : '待创建', '');
+      + (state.ghLastSync ? '<div class="muted" style="margin-top:6px">上次同步：' + esc(syncAgoText()) + '</div>' : '')
+      + (state.ghError ? '<div style="color:var(--color-danger);margin-top:6px">最近错误：' + esc(state.ghError) + '</div>' : '');
+    ghStatus(state.gh.gistId ? '已连接' : (state.ghError ? '失败' : '待创建'), state.gh.gistId ? '' : (state.ghError ? 'off' : ''));
   }
 
   /* ---------------- 视图切换 ---------------- */
@@ -837,25 +918,37 @@
     var tok = $('ghToken');
     if (tok) {
       tok.value = state.gh.token || '';
-      tok.addEventListener('change', function () {
+      var tokTimer = null;
+      function tokUpdated() {
         state.gh.token = tok.value.trim();
         ghSave();
         renderGhBox();
         if (state.gh.token) ghSync(true);
+      }
+      tok.addEventListener('change', tokUpdated);
+      tok.addEventListener('input', function () {
+        clearTimeout(tokTimer);
+        tokTimer = setTimeout(tokUpdated, 800);
       });
     }
     var gid = $('ghGist');
     if (gid) {
       gid.value = state.gh.gistId || '';
-      gid.addEventListener('change', function () {
+      var gidTimer = null;
+      function gidUpdated() {
         var v = gid.value.trim();
         /* 允许直接粘贴 https://gist.github.com/用户名/<id> */
         var m = v.match(/([0-9a-f]{20,})/i);
-        state.gh.gistId = m ? m[1] : '';
+        state.gh.gistId = m ? m[1] : (v ? state.gh.gistId : '');
         gid.value = state.gh.gistId;
         ghSave();
         renderGhBox();
         if (state.gh.token) ghSync(true);
+      }
+      gid.addEventListener('change', gidUpdated);
+      gid.addEventListener('input', function () {
+        clearTimeout(gidTimer);
+        gidTimer = setTimeout(gidUpdated, 800);
       });
     }
     var auto = $('ghAuto');
@@ -924,6 +1017,7 @@
       if (state.gh.auto && state.gh.token) schedulePush();
       return;
     }
+    if (act === 'ghDiag') { ghDiag(); return; }
     if (act === 'ghPush') { ghPush(false); return; }
     if (act === 'ghPull') { ghPull(); return; }
     if (act === 'ghCopyCode') {
@@ -1001,7 +1095,7 @@
     }
     pickReview(false);
     /* 若网址里带了同步码（另一台设备打开同步链接），先接入再同步；否则按本机配置直接同步 */
-    if (!consumeUrlSyncCode()) ghSync();
+    if (!consumeUrlSyncCode()) ghSync(false, true);
     /* 后台自动同步：切回前台 / 恢复网络 / 每 60 秒 / 离开页面前 */
     startAutoSync();
     if (!lsGet('en_visited', false)) {
@@ -1015,7 +1109,7 @@
 
   window.__EN__ = {
     state: state, renderList: renderList, pickReview: pickReview, setLevel: setLevel, speak: speak,
-    ghSync: ghSync, ghPush: ghPush, ghPull: ghPull, flushPush: flushPush,
+    ghSync: ghSync, ghPush: ghPush, ghPull: ghPull, flushPush: flushPush, ghDiag: ghDiag,
     makeSyncCode: makeSyncCode, parseSyncCode: parseSyncCode, applySyncCode: applySyncCode, syncLink: syncLink
   };
 })();
