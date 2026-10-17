@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>英语学习工作台 · 四六级进阶</title>
+<meta name="description" content="四六级进阶英语学习工作台：7800+ 单词、2000+ 情景对话、随机复习与英文朗读。纯静态页面，无需登录。" />
+<meta name="theme-color" content="#1B2A4A" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%233B6FE0'/%3E%3Ctext x='32' y='43' font-size='30' font-family='Helvetica,Arial' font-weight='700' text-anchor='middle' fill='%23fff'%3EA%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-badge">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+      </div>
+      <div class="brand-t">英语学习工作台</div>
+    </div>
+    <div class="brand-s">四六级进阶</div>
+
+    <div class="navlabel">学习</div>
+    <button class="navitem on" data-nav="words">单词库<span class="n" id="nav-words"></span></button>
+    <button class="navitem" data-nav="talks">情景对话<span class="n" id="nav-talks"></span></button>
+
+    <div class="navlabel">数据</div>
+    <button class="navitem" data-nav="setup">备份与设置</button>
+
+    <div class="side-foot">
+      纯静态页面 · 不依赖任何账号<br />
+      学习进度保存在本机浏览器<br />
+      可选同步到你自己的 GitHub
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1 id="pageTitle">单词库</h1>
+        <p id="pageSub">按分类、子类、掌握情况筛选，点 🔊 听发音</p>
+      </div>
+      <div class="spacer"></div>
+      <span class="sync"><span class="dot" id="syncDot"></span><span id="syncText">本地就绪</span></span>
+    </div>
+
+    <!-- ============ 单词 ============ -->
+    <section id="view-words">
+      <div class="card today" style="margin-bottom:18px">
+        <div class="card-h">
+          <h2>单词复习</h2>
+          <span class="chip gray" id="reviewCount">--</span>
+          <div class="spacer"></div>
+          <span class="muted" style="margin-right:4px">每次打开随机换一批</span>
+          <button class="btn ghost sm" id="refreshReview">换一批</button>
+        </div>
+        <div class="card-b" id="reviewList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">
+          <h2>单词库</h2>
+          <div class="spacer"></div>
+          <span class="muted">共 <b id="wordTotal">0</b> 条</span>
+        </div>
+        <div class="card-b">
+          <div class="listbar">
+            <input class="search" id="q-words" type="search" placeholder="搜索单词 / 释义 / 中文" autocomplete="off" />
+            <select class="catsel" id="c-words"><option value="">全部分类</option></select>
+            <select class="catsel" id="s-words" disabled><option value="">子类</option></select>
+            <select class="catsel" id="l-words">
+              <option value="">全部掌握情况</option>
+              <option value="未学">未掌握</option>
+              <option value="学习中">加强学习</option>
+              <option value="已掌握">已掌握</option>
+            </select>
+            <span class="chip gray cnt" id="cnt-words">0 条</span>
+          </div>
+          <div id="list-words"></div>
+          <div class="morewrap" id="more-words" hidden>
+            <button class="btn ghost" data-more="words">加载更多</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 对话 ============ -->
+    <section id="view-talks" hidden>
+      <div class="card">
+        <div class="card-h">
+          <h2>情景对话</h2>
+          <div class="spacer"></div>
+          <span class="muted">共 <b id="talkTotal">0</b> 条</span>
+        </div>
+        <div class="card-b">
+          <div class="listbar">
+            <input class="search" id="q-talks" type="search" placeholder="搜索句子 / 中文" autocomplete="off" />
+            <select class="catsel" id="c-talks"><option value="">全部分类</option></select>
+            <select class="catsel" id="s-talks" disabled><option value="">子类</option></select>
+            <span class="chip gray cnt" id="cnt-talks">0 条</span>
+          </div>
+          <div id="list-talks"></div>
+          <div class="morewrap" id="more-talks" hidden>
+            <button class="btn ghost" data-more="talks">加载更多</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 设置 ============ -->
+    <section id="view-setup" hidden>
+      <div class="stats">
+        <div class="stat"><div class="n" id="st-total">0</div><div class="l">总条目</div></div>
+        <div class="stat"><div class="n" id="st-words">0</div><div class="l">单词</div></div>
+        <div class="stat"><div class="n" id="st-talks">0</div><div class="l">情景对话</div></div>
+        <div class="stat"><div class="n" id="st-full">0</div><div class="l">已掌握</div></div>
+        <div class="stat"><div class="n" id="st-learn">0</div><div class="l">加强学习</div></div>
+        <div class="stat"><div class="n" id="st-rate">0%</div><div class="l">单词掌握率</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:18px">
+        <div class="card-h"><h2>进度备份</h2><div class="spacer"></div><span class="muted">换设备时用得上</span></div>
+        <div class="card-b">
+          <div class="row" style="margin-bottom:10px">
+            <button class="btn dark" data-act="export">导出进度 JSON</button>
+            <label class="btn ghost" style="cursor:pointer;margin:0">
+              导入进度文件
+              <input type="file" id="importFile" accept="application/json,.json" style="display:none" />
+            </label>
+            <button class="btn ghost" data-act="clear">清空进度</button>
+          </div>
+          <div class="muted">导出的是「哪些词已掌握 / 要加强学习」的标记，导出后可在别的设备导入，也可以提交到自己的仓库长期保存。</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:18px">
+        <div class="card-h">
+          <h2>GitHub 同步</h2>
+          <span class="dot off" id="ghStatus"></span>
+          <div class="spacer"></div>
+          <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="ghAuto" /> 自动同步
+          </label>
+        </div>
+        <div class="card-b">
+          <div class="field">
+            <label for="ghToken">GitHub Personal Access Token（只需 gist 权限）</label>
+            <input id="ghToken" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="row" style="margin-bottom:12px">
+            <button class="btn ghost" data-act="ghTest">验证 Token</button>
+            <button class="btn dark" data-act="ghPush">上传进度到 Gist</button>
+            <button class="btn ghost" data-act="ghPull">从 Gist 拉取</button>
+          </div>
+          <div id="ghBox"></div>
+          <div class="muted" style="margin-top:10px">
+            说明：进度会写进你自己账号下的一个<strong>私有 Gist</strong>，不经过任何第三方服务器；
+            Token 只存在这台设备的浏览器里，不会上传。在
+            <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=English%20Workstation" target="_blank" rel="noopener" style="color:var(--accent)">这里</a>
+            生成（勾选 <code>gist</code> 即可）。
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>关于</h2></div>
+        <div class="card-b">
+          <ul class="src">
+            <li><b>内容</b>：电气专业词汇、空调制冷词汇、商务口语 900 句、常用口语 1000 句、日常生活词汇大全，共 <b id="st-total2">0</b> 条，7 个分类、120+ 子类。</li>
+            <li><b>发音</b>：调用浏览器内置语音合成（Web Speech API），不联网、不消耗额度；Chrome / Edge / Safari 支持最好。</li>
+            <li><b>数据</b>：本页面不含任何后端与账号体系，断网也能用；学习进度默认只存在本机 localStorage。</li>
+            <li><b>没有 AI 对话</b>：已按要求移除，页面不再加载任何云服务 SDK。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="tabbar">
+  <button class="on" data-nav="words">单词库</button>
+  <button data-nav="talks">情景对话</button>
+  <button data-nav="setup">设置</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
