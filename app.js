@@ -89,11 +89,17 @@
   }
   function setLevel(id, lv, opts) {
     opts = opts || {};
+    /* 再点当前状态＝取消标记，回到「未掌握」（写成一条 lv=未学 的记录，这样取消动作也会同步到其他设备） */
+    var cur = (state.prog[id] && state.prog[id].lv) || '未学';
+    var canceled = false;
+    if (opts.toggle && lv !== '未学' && cur === lv) { lv = '未学'; canceled = true; }
     if (!state.prog[id]) state.prog[id] = {};
     state.prog[id].lv = lv;
     state.prog[id].t = Date.now();
     saveProg();
-    if (opts.silent !== true) toast('已标记为「' + levelName(lv) + '」');
+    if (opts.silent !== true) {
+      toast(canceled ? '已取消标记，恢复「未掌握」' : '已标记为「' + levelName(lv) + '」');
+    }
     if (state.gh.auto && state.gh.token) schedulePush();
   }
   function saveProg() {
@@ -161,8 +167,8 @@
       head = sayBtn(it.i + '_a', it.en || it.t) +
         '<span class="ttl">' + esc(it.t || it.en) + '</span>' + chips +
         '<div style="flex:1 1 auto"></div>' +
-        '<button class="btn ghost sm' + (lv === '已掌握' ? ' on' : '') + '" data-lvl="' + esc(it.i) + '|已掌握">已掌握</button>' +
-        '<button class="btn ghost sm' + (lv === '学习中' ? ' on' : '') + '" data-lvl="' + esc(it.i) + '|学习中">加强学习</button>';
+        '<button class="btn ghost sm' + (lv === '已掌握' ? ' on' : '') + '" data-lvl="' + esc(it.i) + '|已掌握" title="' + (lv === '已掌握' ? '再点一次取消标记' : '标记为已掌握') + '">已掌握</button>' +
+        '<button class="btn ghost sm' + (lv === '学习中' ? ' on' : '') + '" data-lvl="' + esc(it.i) + '|学习中" title="' + (lv === '学习中' ? '再点一次取消标记' : '标记为要加强学习') + '">加强学习</button>';
       body = (it.en && it.en !== it.t ? '<div class="en">' + esc(it.en) + '</div>' : '') +
         (it.cn ? '<div class="cn">' + esc(it.cn) + '</div>' : '');
       if (it.en && it.en === it.t && it.cn) body = '<div class="cn">' + esc(it.cn) + '</div>';
@@ -255,8 +261,8 @@
         '<div class="grow"><div class="t">' + esc(it.t || it.en) + '</div>' +
         '<div class="s">' + esc([it.en !== it.t ? it.en : '', it.cn].filter(Boolean).join(' · ') || (it.c || '')) + '</div></div>' +
         '<span class="chip ' + levelChipCls(lv) + '">' + levelName(lv) + '</span>' +
-        '<button class="btn ghost sm" data-rlvl="' + esc(it.i) + '|已掌握">还是已掌握</button>' +
-        '<button class="btn ghost sm" data-rlvl="' + esc(it.i) + '|学习中">要加强学习</button>' +
+        '<button class="btn ghost sm' + (lv === '已掌握' ? ' on' : '') + '" data-rlvl="' + esc(it.i) + '|已掌握" title="' + (lv === '已掌握' ? '再点一次取消标记' : '标记为已掌握') + '">还是已掌握</button>' +
+        '<button class="btn ghost sm' + (lv === '学习中' ? ' on' : '') + '" data-rlvl="' + esc(it.i) + '|学习中" title="' + (lv === '学习中' ? '再点一次取消标记' : '标记为要加强学习') + '">要加强学习</button>' +
         '</div>';
     }
     box.innerHTML = h;
@@ -912,7 +918,7 @@
         var k = lv.lastIndexOf('|');
         if (k > 0) {
           var id = lv.slice(0, k), val = lv.slice(k + 1);
-          setLevel(id, val);
+          setLevel(id, val, { toggle: true });     /* 再点同一个状态＝取消标记 */
           state.review = state.review.filter(function (x) { return x.i !== id; });
           renderReview();
           renderList('words');
