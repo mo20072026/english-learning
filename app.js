@@ -7,7 +7,8 @@
 
   var DATA = (window.EN_DATA && window.EN_DATA.items) ? window.EN_DATA : { cats: {}, items: [] };
   var ITEMS = DATA.items || [];
-  var LS_PROG = 'en_prog_v1';
+  var LS_PROG = 'en_prog_v2';   /* v2：2026-10-17 全量重置为「未掌握」，旧进度作废 */
+  var LS_PROG_OLD = 'en_prog_v1';
   var LS_GH = 'en_gh_v1';
   var PAGE = 40;
   var REVIEW_N = 10;
@@ -196,6 +197,12 @@
 
   function pickReview(force) {
     var pool = reviewPool();
+    /* 全部都是「未掌握」时（如刚重置），先从单词库里随机抽，避免复习区空着 */
+    state.reviewFallback = false;
+    if (!pool.length) {
+      pool = INDEX.words.slice();
+      state.reviewFallback = true;
+    }
     var seen = (force && state.reviewSeen) || [];
     var pick = [];
     var seenSet = {};
@@ -215,7 +222,9 @@
     if (!box) return;
     var items = state.review.filter(function (it) { return !!findItem(it.i); });
     if (cnt) {
-      cnt.textContent = items.length ? ('本轮 ' + items.length + ' 个') : '暂无可复习';
+      cnt.textContent = items.length
+        ? ('本轮 ' + items.length + ' 个' + (state.reviewFallback ? ' · 未掌握随机' : ''))
+        : '暂无可复习';
       cnt.className = 'chip ' + (items.length ? 'orange' : 'gray');
     }
     if (!items.length) {
@@ -630,6 +639,8 @@
 
   /* ---------------- 启动 ---------------- */
   function boot() {
+    /* 旧版进度（v1）不再使用，直接清除，保证所有词条回到「未掌握」 */
+    try { localStorage.removeItem(LS_PROG_OLD); } catch (e) {}
     state.prog = lsGet(LS_PROG, {}) || {};
     var gh = lsGet(LS_GH, null);
     if (gh && gh.token) state.gh = { token: gh.token, gistId: gh.gistId || '', auto: gh.auto !== false };
