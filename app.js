@@ -24,6 +24,7 @@
     prog: {},
     resetAt: 0,
     ttsDisabled: false,
+    ttsFail: 0,
     gh: { token: '', gistId: '', auto: true },
     review: [],
     reviewSeen: [],
@@ -277,13 +278,33 @@
     if (nt) nt.textContent = t;
   }
 
-  /* ---------------- 朗读（音频 TTS） ---------------- */
+  /* ---------------- 朗读（多源音频 TTS） ----------------
+   * 有道对长句会返回 500，故按「有道 → 百度」依次尝试；
+   * 单条失败只提示，连续失败 3 次才隐藏全部按钮。 */
+  var TTS_MAXLEN = 160;
+  var TTS_PROVIDERS = [
+    { name: '有道', url: function (t) { return 'https://dict.youdao.com/dictvoice?audio=' + encodeURIComponent(t) + '&type=1'; } },
+    { name: '百度', url: function (t) { return 'https://fanyi.baidu.com/gettts?lan=en&text=' + encodeURIComponent(t) + '&spd=3&source=web'; } }
+  ];
+  function ttsText(text) {
+    var t = String(text || '').replace(/\s+/g, ' ').trim();
+    if (t.length > TTS_MAXLEN) {
+      var sents = t.match(/[^.!?]+[.!?]?/g) || [t];
+      var buf = '';
+      for (var i = 0; i < sents.length; i++) {
+        if (buf && buf.length + sents[i].length > TTS_MAXLEN) break;
+        buf += sents[i];
+      }
+      t = buf.trim() || t.slice(0, TTS_MAXLEN);
+    }
+    return t;
+  }
   function sayDisabled() { return state.ttsDisabled || lsGet('en_tts_disabled', false); }
   function hideSayBtns() {
     state.ttsDisabled = true;
     lsSet('en_tts_disabled', true);
     document.body.classList.add('say-hidden');
-    toast('当前环境无法朗读，已隐藏朗读按钮');
+    toast('连续多次朗读失败，已隐藏朗读按钮');
   }
   function showSayBtns() {
     state.ttsDisabled = false;
@@ -294,20 +315,33 @@
   function speak(text) {
     if (!text) return;
     if (sayDisabled() || !canPlayAudio()) return;
-    var url = 'https://dict.youdao.com/dictvoice?audio=' + encodeURIComponent(text) + '&type=1';
-    var a = new Audio(url);
-    var failed = false;
-    function fail(msg) {
-      if (failed) return;
-      failed = true;
-      a.pause();
-      hideSayBtns();
+    playTts(ttsText(text), 0);
+  }
+  function playTts(text, idx) {
+    if (idx >= TTS_PROVIDERS.length) {
+      state.ttsFail = (state.ttsFail || 0) + 1;
+      toast('这条暂时没有发音，换一条试试');
+      if (state.ttsFail >= 3) hideSayBtns();
+      return;
     }
-    a.addEventListener('error', function () { fail('audio error'); });
+    var a = new Audio(TTS_PROVIDERS[idx].url(text));
+    var settled = false;
+    function stop() { try { a.pause(); } catch (e) { /* 忽略 */ } }
+    function next() {
+      if (settled) return;
+      settled = true;
+      stop();
+      playTts(text, idx + 1);
+    }
+    a.addEventListener('error', next);
+    a.addEventListener('stalled', next);
     var p;
-    try { p = a.play(); } catch (e) { fail(e.message); return; }
+    try { p = a.play(); } catch (e) { next(); return; }
     if (p && typeof p.then === 'function') {
-      p.catch(function (e) { fail(e.message); });
+      p.then(function () { state.ttsFail = 0; }).catch(function (e) {
+        if (e && e.name === 'NotAllowedError') { toast('浏览器阻止了自动播放，请再点一次'); return; }
+        next();
+      });
     }
   }
 
@@ -756,6 +790,11 @@
     switchView('words');
     bind();
 
+    /* 早期版本一次失败就永久隐藏朗读按钮，这里把该标记作废一次，让按钮重新出现 */
+    if (!lsGet('en_tts_mig_v2', false)) {
+      try { localStorage.removeItem('en_tts_disabled'); } catch (e) { /* 忽略 */ }
+      lsSet('en_tts_mig_v2', true);
+    }
     if (sayDisabled() || !canPlayAudio()) {
       document.body.classList.add('say-hidden');
     }
