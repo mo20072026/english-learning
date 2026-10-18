@@ -429,7 +429,11 @@
   /* 读取本机保存的同步配置：localStorage 没有时回退到 cookie */
   function ghLoadCfg() {
     var gh = lsGet(LS_GH, null);
-    if (gh && gh.token) return gh;
+    if (gh && gh.token) {
+      /* 老用户只有 localStorage、没有 cookie：顺手补写 cookie，缓存被清时能恢复 */
+      if (!cookieGet(GH_COOKIE)) cookieSet(GH_COOKIE, JSON.stringify(gh), 365);
+      return gh;
+    }
     var raw = cookieGet(GH_COOKIE);
     if (!raw) return null;
     try {
