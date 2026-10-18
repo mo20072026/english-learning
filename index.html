@@ -80,9 +80,7 @@
             <span class="chip gray cnt" id="cnt-words">0 条</span>
           </div>
           <div id="list-words"></div>
-          <div class="morewrap" id="more-words" hidden>
-            <button class="btn ghost" data-more="words">加载更多</button>
-          </div>
+          <div class="pagerwrap" id="pager-words" hidden></div>
         </div>
       </div>
     </section>
@@ -103,9 +101,7 @@
             <span class="chip gray cnt" id="cnt-talks">0 条</span>
           </div>
           <div id="list-talks"></div>
-          <div class="morewrap" id="more-talks" hidden>
-            <button class="btn ghost" data-more="talks">加载更多</button>
-          </div>
+          <div class="pagerwrap" id="pager-talks" hidden></div>
         </div>
       </div>
     </section>
@@ -177,6 +173,7 @@
                 <button class="btn dark" data-act="ghCopyCode">复制同步码</button>
                 <button class="btn ghost" data-act="ghCopyLink">复制同步链接</button>
                 <button class="btn ghost" data-act="ghImportCode">用同步码接入</button>
+                <button class="btn ghost" data-act="ghForget">忘记此设备</button>
               </div>
             </div>
           </details>

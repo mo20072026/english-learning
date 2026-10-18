@@ -12,7 +12,8 @@
   var LS_GH = 'en_gh_v1';
   var LS_RESET = 'en_prog_reset_v1';   /* 最近一次「清空进度」的时间戳，同步时用来压过云端旧标记 */
   var LS_LASTSYNC = 'en_sync_at_v1';   /* 最近一次成功同步的时间，仅用于展示 */
-  var PAGE = 40;
+  var PAGE = 10;          /* 每页条数 */
+  var PAGER_SPAN = 2;     /* 当前页左右各显示几个页码 */
   var REVIEW_N = 10;
 
   var state = {
@@ -21,7 +22,7 @@
     cat: { words: '', talks: '' },
     sub: { words: '', talks: '' },
     lv: { words: '' },
-    page: { words: PAGE, talks: PAGE },
+    page: { words: 1, talks: 1 },    /* 页码，从 1 开始 */
     prog: {},
     resetAt: 0,
     ttsDisabled: false,
@@ -188,7 +189,10 @@
     if (!box) return;
     var rows = filtered(kind);
     var total = rows.length;
-    var show = Math.min(state.page[kind], total);
+    var pages = Math.max(1, Math.ceil(total / PAGE));
+    var page = Math.min(Math.max(1, state.page[kind] | 0), pages);
+    state.page[kind] = page;
+    var start = (page - 1) * PAGE;
     var cnt = $('cnt-' + kind);
     if (cnt) { cnt.textContent = total + ' 条'; cnt.className = 'chip gray cnt'; }
 
@@ -196,15 +200,48 @@
       box.innerHTML = '<div class="empty">没有符合条件的条目，换个关键词或筛选试试。</div>';
     } else {
       var h = '';
-      for (var i = 0; i < show; i++) h += itemHtml(rows[i], kind);
+      for (var i = start; i < Math.min(start + PAGE, total); i++) h += itemHtml(rows[i], kind);
       box.innerHTML = h;
     }
-    var more = $('more-' + kind);
-    if (more) {
-      more.hidden = show >= total;
-      var btn = more.querySelector('button');
-      if (btn) btn.textContent = '加载更多（还有 ' + (total - show) + ' 条）';
+    var pager = $('pager-' + kind);
+    if (pager) {
+      pager.innerHTML = total ? pagerHtml(kind, total, pages, page) : '';
+      pager.hidden = !total || pages <= 1;
     }
+  }
+
+  /* 分页控件：上一页 / 页码（带省略号）/ 下一页 / 输入页码跳转 */
+  function pagerHtml(kind, total, pages, page) {
+    var nums = [];
+    var add = function (n) { if (n >= 1 && n <= pages && nums.indexOf(n) < 0) nums.push(n); };
+    add(1); add(2); add(pages); add(pages - 1);
+    for (var i = page - PAGER_SPAN; i <= page + PAGER_SPAN; i++) add(i);
+    nums.sort(function (a, b) { return a - b; });
+    var mid = '', prev = 0;
+    nums.forEach(function (n) {
+      if (prev && n - prev > 1) mid += '<span class="pg-gap">…</span>';
+      mid += '<button class="btn ghost sm' + (n === page ? ' on' : '') + '" data-pg="' + kind + '|' + n + '">' + n + '</button>';
+      prev = n;
+    });
+    return '<div class="pager">' +
+        '<button class="btn ghost sm" data-pg="' + kind + '|' + Math.max(1, page - 1) + '"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
+        mid +
+        '<button class="btn ghost sm" data-pg="' + kind + '|' + Math.min(pages, page + 1) + '"' + (page >= pages ? ' disabled' : '') + '>下一页</button>' +
+        '<span class="muted pg-info">第 ' + page + '/' + pages + ' 页 · 共 ' + total + ' 条</span>' +
+        '<span class="pg-jump">跳到 <input class="pg-input" id="pg-' + kind + '" type="number" min="1" max="' + pages + '" value="' + page + '" /> 页' +
+        '<button class="btn ghost sm" data-pg-go="' + kind + '">跳转</button></span>' +
+      '</div>';
+  }
+  function gotoPage(kind, n) {
+    var rows = filtered(kind);
+    var pages = Math.max(1, Math.ceil(rows.length / PAGE));
+    n = parseInt(n, 10);
+    if (!n || n < 1) n = 1;
+    if (n > pages) n = pages;
+    state.page[kind] = n;
+    renderList(kind);
+    var box = $('list-' + kind);
+    if (box && box.scrollIntoView) box.scrollIntoView({ block: 'start' });
   }
 
   /* ---------------- 渲染：复习 ---------------- */
@@ -366,7 +403,41 @@
   var GH_FILE = 'english-progress.json';
   var GH_API = 'https://api.github.com';
 
-  function ghSave() { lsSet(LS_GH, state.gh); }
+  /* 凭据双写：localStorage 为主，cookie 兜底一年。
+     手机浏览器（iOS Safari / 微信）清理缓存时会丢掉 localStorage，cookie 通常活得更久，
+     这样"填一次 Token"能真正记住，不用反复输入。 */
+  var GH_COOKIE = 'en_gh_cfg';
+  function cookieSet(name, val, days) {
+    try {
+      var attrs = '; path=/; max-age=' + (days * 86400) + '; SameSite=Lax';
+      if (location.protocol === 'https:') attrs += '; Secure';
+      document.cookie = name + '=' + encodeURIComponent(val) + attrs;
+    } catch (e) { /* 无痕模式等场景忽略 */ }
+  }
+  function cookieGet(name) {
+    try {
+      var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    } catch (e) { return ''; }
+  }
+  function ghSave() {
+    var cfg = { token: state.gh.token || '', gistId: state.gh.gistId || '', auto: state.gh.auto !== false };
+    lsSet(LS_GH, cfg);
+    if (cfg.token) cookieSet(GH_COOKIE, JSON.stringify(cfg), 365);
+    else cookieSet(GH_COOKIE, '', 0);
+  }
+  /* 读取本机保存的同步配置：localStorage 没有时回退到 cookie */
+  function ghLoadCfg() {
+    var gh = lsGet(LS_GH, null);
+    if (gh && gh.token) return gh;
+    var raw = cookieGet(GH_COOKIE);
+    if (!raw) return null;
+    try {
+      gh = JSON.parse(raw);
+      if (gh && gh.token) { lsSet(LS_GH, gh); return gh; }   /* 顺手补回 localStorage */
+    } catch (e) { /* 忽略坏数据 */ }
+    return null;
+  }
   function ghHeaders() {
     return {
       'Authorization': 'Bearer ' + state.gh.token,
@@ -976,6 +1047,18 @@
     sel.disabled = !cat;
   }
 
+  /* 页码输入框回车跳转（用事件委托，分页重绘后无需重新绑定） */
+  function bindPagerKeys() {
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      var el = e.target;
+      var m = el && el.id ? el.id.match(/^pg-(words|talks)$/) : null;
+      if (!m) return;
+      e.preventDefault();
+      gotoPage(m[1], el.value);
+    });
+  }
+
   function refreshAll() {
     renderStats();
     renderList('words');
@@ -995,12 +1078,18 @@
       var say = t.getAttribute('data-say');
       if (say) { speak(say); return; }
 
-      var more = t.getAttribute('data-more');
-      if (more) {
-        state.page[more] += PAGE;
-        renderList(more);
+      var pg = t.getAttribute('data-pg');
+      if (pg) {
+        var pk = pg.indexOf('|');
+        if (pk > 0) { gotoPage(pg.slice(0, pk), pg.slice(pk + 1)); return; }
+      }
+      var pgGo = t.getAttribute('data-pg-go');
+      if (pgGo) {
+        var pin = $('pg-' + pgGo);
+        gotoPage(pgGo, pin ? pin.value : 1);
         return;
       }
+
 
       var lv = t.getAttribute('data-lvl') || t.getAttribute('data-rlvl');
       if (lv) {
@@ -1034,7 +1123,7 @@
           clearTimeout(timer);
           timer = setTimeout(function () {
             state.q[kind] = q.value.trim();
-            state.page[kind] = PAGE;
+            state.page[kind] = 1;
             renderList(kind);
           }, 180);
         });
@@ -1043,14 +1132,14 @@
       if (c) c.addEventListener('change', function () {
         state.cat[kind] = c.value;
         state.sub[kind] = '';
-        state.page[kind] = PAGE;
+        state.page[kind] = 1;
         fillSubs(kind);
         renderList(kind);
       });
       var s = $('s-' + kind);
       if (s) s.addEventListener('change', function () {
         state.sub[kind] = s.value;
-        state.page[kind] = PAGE;
+        state.page[kind] = 1;
         renderList(kind);
       });
     });
@@ -1058,7 +1147,7 @@
     var lvSel = $('l-words');
     if (lvSel) lvSel.addEventListener('change', function () {
       state.lv.words = lvSel.value;
-      state.page.words = PAGE;
+      state.page.words = 1;
       renderList('words');
     });
 
@@ -1165,6 +1254,18 @@
       return;
     }
     if (act === 'ghDiag') { ghDiag(); return; }
+    if (act === 'ghForget') {
+      if (!confirm('清除本机保存的 Token 与同步配置？清除后需要重新填一次 Token（别的设备不受影响）。')) return;
+      state.gh = { token: '', gistId: '', auto: true };
+      ghSave();
+      try { localStorage.removeItem(LS_GH); } catch (e) { /* 忽略 */ }
+      var t2 = $('ghToken'), g2 = $('ghGist');
+      if (t2) t2.value = '';
+      if (g2) g2.value = '';
+      renderGhBox();
+      toast('已清除本机的 Token');
+      return;
+    }
     if (act === 'ghUnify') { ghUnify(); return; }
     if (act === 'ghPush') { ghPush(false); return; }
     if (act === 'ghPull') { ghPull(); return; }
@@ -1222,7 +1323,7 @@
     try { localStorage.removeItem(LS_PROG_OLD); } catch (e) {}
     state.prog = lsGet(LS_PROG, {}) || {};
     state.resetAt = lsGet(LS_RESET, 0) || 0;
-    var gh = lsGet(LS_GH, null);
+    var gh = ghLoadCfg();
     if (gh && gh.token) state.gh = { token: gh.token, gistId: gh.gistId || '', auto: gh.auto !== false };
     state.ghLastSync = lsGet(LS_LASTSYNC, 0) || 0;
 
@@ -1232,6 +1333,7 @@
     refreshAll();
     switchView('words');
     bind();
+    bindPagerKeys();
 
     /* 早期版本一次失败就永久隐藏朗读按钮，这里把该标记作废一次，让按钮重新出现 */
     if (!lsGet('en_tts_mig_v2', false)) {
